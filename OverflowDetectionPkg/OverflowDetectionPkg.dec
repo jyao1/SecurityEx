@@ -1,0 +1,49 @@
+## @file
+#
+# Copyright (c) 2012, Intel Corporation. All rights reserved.<BR>
+#
+#    This program and the accompanying materials
+#    are licensed and made available under the terms and conditions of the BSD License
+#    which accompanies this distribution. The full text of the license may be found at
+#    http://opensource.org/licenses/bsd-license.php
+#
+#    THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
+#
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 0x00010005
+  PACKAGE_NAME                   = OverflowDetectionPkg
+  PACKAGE_GUID                   = 45E2447F-E5F3-4454-80DD-7A4596418FD8
+  PACKAGE_VERSION                = 0.1
+
+[Includes]
+  Include
+
+[Guids]
+  gEfiOverflowDetectionPkgTokenSpaceGuid       = { 0x3bb9cde7, 0xcb8, 0x4465, { 0x8f, 0x2b, 0x2e, 0xf5, 0xc1, 0xc8, 0xda, 0x30 }}
+
+[PcdsFeatureFlag]
+  ## Indicates if UEFI Stack Guard will be enabled.
+  #  If enabled, stack overflow in UEFI can be caught, preventing chaotic consequences.<BR><BR>
+  #   TRUE  - UEFI Stack Guard will be enabled.<BR>
+  #   FALSE - UEFI Stack Guard will be disabled.<BR>
+  # @Prompt Enable UEFI Stack Guard.
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdCpuStackGuard|TRUE|BOOLEAN|0x00010001
+
+  ## Indicates if NULL address protection will be enabled.
+  #  If enabled, accessing NULL address in UEFI can be caught.<BR><BR>
+  #   TRUE  - NULL address protection will be enabled.<BR>
+  #   FALSE - NULL address protection will be disabled.<BR>
+  # @Prompt Enable NULL address protection.
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdNullPointerProtection|TRUE|BOOLEAN|0x00010002
+
+  ## Indicates if UEFI Heap Page Guard will be enabled.
+  #  If enabled, a Guard Page is setup for PageAllocation to avoid heap overflow.<BR><BR>
+  #  NOTE: This feature is NOT for Pool Guard. Pool overflow may be detected by FreePool().
+  #        Or pool overflow may trigger page guard if the overflow cross page.
+  #   TRUE  - UEFI Heap Page Guard will be enabled.<BR>
+  #   FALSE - UEFI Heap Page Guard will be disabled.<BR>
+  # @Prompt Enable UEFI Stack Guard.
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPageGuard|TRUE|BOOLEAN|0x00010003
