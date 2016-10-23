@@ -39,6 +39,14 @@ static void __cdecl __report_gsfailure(UINTN StackCookie)
   return ;
 }
 
+__declspec(noreturn) void __cdecl __report_rangecheckfailure()
+{
+  DEBUG((EFI_D_ERROR, "\n!!! range check check failed in cookie checker!!!\n"));
+  ASSERT(FALSE);
+
+  CpuDeadLoop();
+}
+
 void __fastcall __security_check_cookie(UINTN cookie)
 {
   if (cookie == __security_cookie) {
