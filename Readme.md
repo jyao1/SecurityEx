@@ -40,6 +40,8 @@ This package is to demonstrate how to use compiler option to check stack.
 3.2) Unit Test.
   StackCheckPkg\Test\StackCookieTest.
 
+For more detail, please refer to https://github.com/tianocore-docs/Docs/raw/master/White_Papers/A_Tour_Beyond_BIOS_Securiy_Enhancement_to_Mitigate_Buffer_Overflow_in_UEFI.pdf
+
 ## Known limitation:
 This package is only the sample code to show the concept.
 It does not have a full validation and does not meet the production quality yet.
