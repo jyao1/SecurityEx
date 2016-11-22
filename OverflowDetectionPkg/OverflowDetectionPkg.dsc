@@ -203,3 +203,6 @@
   OverflowDetectionPkg/Test/DoubleFree/DoubleFreePoolSmm.inf
   OverflowDetectionPkg/Test/DoubleFree/DoubleFreePage.inf
   OverflowDetectionPkg/Test/DoubleFree/DoubleFreePageSmm.inf
+
+  OverflowDetectionPkg/Test/WriteCodeSection/WriteCodeSectionSmm.inf
+  OverflowDetectionPkg/Test/ExecDataSection/ExecDataSectionSmm.inf
