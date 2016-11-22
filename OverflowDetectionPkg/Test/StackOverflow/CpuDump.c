@@ -166,7 +166,7 @@ DumpGdt(
   Count = (GdtPtr.Limit + 1) / sizeof(IA32_SEGMENT_DESCRIPTOR);
   for (Index = 0; Index < Count; Index++) {
     DEBUG((EFI_D_INFO, "%02x: 0x%016lx (Type: 0x%x)\n", Index * sizeof(IA32_SEGMENT_DESCRIPTOR), SegDesc[Index].Uint64, SegDesc[Index].Bits.Type));
-    if ((SegDesc[Index].Bits.P == 1) && ((SegDesc[Index].Bits.Type & 0xD) == 0x9) && (SegDesc[Index].Bits.DB == 0) && (SegDesc[Index].Bits.L == 0)) { // IA32_GDT_TYPE_TSS
+    if ((SegDesc[Index].Bits.P == 1) && ((SegDesc[Index].Bits.Type & 0xB) == 0x9) && (SegDesc[Index].Bits.DB == 0) && (SegDesc[Index].Bits.L == 0)) { // IA32_GDT_TYPE_TSS
 #if defined (MDE_CPU_X64)
       // TSS is expanded
       DEBUG((EFI_D_INFO, "    0x%016lx\n", SegDesc[Index + 1].Uint64));
