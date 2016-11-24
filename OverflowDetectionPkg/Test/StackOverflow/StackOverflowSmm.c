@@ -11,7 +11,9 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 
 **/
 
-#include <Uefi.h>
+#include <PiSmm.h>
+#include <Library/DebugLib.h>
+#include <Library/SmmServicesTableLib.h>
 
 VOID
 DumpArchStatus(
@@ -26,13 +28,34 @@ TestCode (
 
 EFI_STATUS
 EFIAPI
+SmmReadyToBootCallback (
+  IN CONST EFI_GUID                       *Protocol,
+  IN VOID                                 *Interface,
+  IN EFI_HANDLE                           Handle
+  )
+{
+  //DumpArchStatus();
+
+  TestCode();
+  return EFI_SUCCESS;
+}
+
+EFI_STATUS
+EFIAPI
 StackOverflowEntrypoint(
   IN EFI_HANDLE         ImageHandle,
   IN EFI_SYSTEM_TABLE   *SystemTable
   )
 {
-  DumpArchStatus();
+  EFI_STATUS  Status;
+  VOID        *SmmReadyToBootRegistration;
 
-  TestCode();
+  Status = gSmst->SmmRegisterProtocolNotify (
+                    &gEdkiiSmmReadyToBootProtocolGuid,
+                    SmmReadyToBootCallback,
+                    &SmmReadyToBootRegistration
+                    );
+  ASSERT_EFI_ERROR (Status);
+
   return EFI_SUCCESS;
 }

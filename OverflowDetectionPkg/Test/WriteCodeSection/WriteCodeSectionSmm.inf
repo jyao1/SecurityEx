@@ -21,7 +21,7 @@
   ENTRY_POINT                    = WriteCodeSectionEntrypoint
 
 [Sources]
-  WriteCodeSection.c
+  WriteCodeSectionSmm.c
 
 [Packages]
   MdePkg/MdePkg.dec

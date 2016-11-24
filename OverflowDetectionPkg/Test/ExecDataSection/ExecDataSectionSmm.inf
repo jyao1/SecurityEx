@@ -21,7 +21,7 @@
   ENTRY_POINT                    = ExecDataSectionEntrypoint
 
 [Sources]
-  ExecDataSection.c
+  ExecDataSectionSmm.c
 
 [Packages]
   MdePkg/MdePkg.dec

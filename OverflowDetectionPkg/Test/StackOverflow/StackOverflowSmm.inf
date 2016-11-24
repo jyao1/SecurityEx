@@ -21,16 +21,27 @@
   ENTRY_POINT                    = StackOverflowEntrypoint
 
 [Sources]
-  StackOverflow.c
+  StackOverflowSmm.c
   CpuDump.c
+
+[Sources.Ia32]
+  Ia32/Stack.nasm
+
+[Sources.X64]
+  X64/Stack.nasm
 
 [Packages]
   MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
 
 [LibraryClasses]
   UefiDriverEntryPoint
   BaseLib
   DebugLib
+  SmmServicesTableLib
+
+[Protocols]
+  gEdkiiSmmReadyToBootProtocolGuid
 
 [Depex]
   gEfiSmmCpuProtocolGuid
