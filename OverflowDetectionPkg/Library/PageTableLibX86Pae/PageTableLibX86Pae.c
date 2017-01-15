@@ -114,7 +114,7 @@ GetCurrentPagingContext (
     AsmCpuid (0x80000001, NULL, NULL, NULL, &RegEdx);
     if ((RegEdx & BIT20) != 0) {
       // XD supported
-      if ((AsmReadMsr64 (0x000001A0) & BIT34) != 0) {
+      if ((AsmReadMsr64 (0x000001A0) & BIT34) == 0) {
         // XD enabled
         if ((AsmReadMsr64 (0xC0000080) & BIT11) != 0) {
           // XD activated
