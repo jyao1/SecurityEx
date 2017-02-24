@@ -4,7 +4,7 @@
   It consumes FV HOBs and creates read-only Firmare Volume Block protocol
   instances for each of them.
 
-Copyright (c) 2006 - 2014, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2006 - 2016, Intel Corporation. All rights reserved.<BR>
 This program and the accompanying materials
 are licensed and made available under the terms and conditions of the BSD License
 which accompanies this distribution.  The full text of the license may be found at
@@ -234,7 +234,7 @@ FwVolBlockReadBlock (
 
   if (Offset > FvbDevice->LbaCache[LbaIndex].Length) {
     //
-    // all exceed boundry, read nothing.
+    // all exceed boundary, read nothing.
     //
     *NumBytes = 0;
     return EFI_BAD_BUFFER_SIZE;
@@ -243,7 +243,7 @@ FwVolBlockReadBlock (
   NumOfBytesRead = *NumBytes;
   if (Offset + NumOfBytesRead > FvbDevice->LbaCache[LbaIndex].Length) {
     //
-    // partial exceed boundry, read data from current postion to end.
+    // partial exceed boundary, read data from current postion to end.
     //
     NumOfBytesRead = FvbDevice->LbaCache[LbaIndex].Length - Offset;
   }
@@ -495,6 +495,13 @@ ProduceFVBProtocolOnBuffer (
       //
       // FvImage buffer is not at its required alignment.
       //
+      DEBUG ((
+        DEBUG_ERROR,
+        "Unaligned FvImage found at 0x%lx:0x%lx, the required alignment is 0x%x\n",
+        BaseAddress,
+        Length,
+        FvAlignment
+        ));
       return EFI_VOLUME_CORRUPTED;
     }
   }

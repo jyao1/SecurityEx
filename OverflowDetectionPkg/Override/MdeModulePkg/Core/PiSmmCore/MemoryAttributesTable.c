@@ -1,7 +1,7 @@
 /** @file
-  UEFI PropertiesTable support
+  PI SMM MemoryAttributes support
 
-Copyright (c) 2015 - 2017, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2016, Intel Corporation. All rights reserved.<BR>
 This program and the accompanying materials
 are licensed and made available under the terms and conditions of the BSD License
 which accompanies this distribution.  The full text of the license may be found at
@@ -17,24 +17,39 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/BaseMemoryLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiBootServicesTableLib.h>
-#include <Library/DxeServicesTableLib.h>
+#include <Library/SmmServicesTableLib.h>
 #include <Library/DebugLib.h>
-#include <Library/UefiLib.h>
 #include <Library/PcdLib.h>
-
-#include <Guid/EventGroup.h>
-#include <Protocol/DxeSmmReadyToLock.h>
 
 #include <Library/PeCoffLib.h>
 #include <Library/PeCoffGetEntryPointLib.h>
-#include <Protocol/Runtime.h>
 
-#include <Guid/PropertiesTable.h>
+#include <Guid/PiSmmMemoryAttributesTable.h>
 
-#include "DxeMain.h"
+#include "PiSmmCore.h"
 
 #define PREVIOUS_MEMORY_DESCRIPTOR(MemoryDescriptor, Size) \
   ((EFI_MEMORY_DESCRIPTOR *)((UINT8 *)(MemoryDescriptor) - (Size)))
+
+#define IMAGE_PROPERTIES_RECORD_CODE_SECTION_SIGNATURE SIGNATURE_32 ('I','P','R','C')
+
+typedef struct {
+  UINT32                 Signature;
+  LIST_ENTRY             Link;
+  EFI_PHYSICAL_ADDRESS   CodeSegmentBase;
+  UINT64                 CodeSegmentSize;
+} IMAGE_PROPERTIES_RECORD_CODE_SECTION;
+
+#define IMAGE_PROPERTIES_RECORD_SIGNATURE SIGNATURE_32 ('I','P','R','D')
+
+typedef struct {
+  UINT32                 Signature;
+  LIST_ENTRY             Link;
+  EFI_PHYSICAL_ADDRESS   ImageBase;
+  UINT64                 ImageSize;
+  UINTN                  CodeSegmentCount;
+  LIST_ENTRY             CodeSegmentList;
+} IMAGE_PROPERTIES_RECORD;
 
 #define IMAGE_PROPERTIES_PRIVATE_DATA_SIGNATURE SIGNATURE_32 ('I','P','P','D')
 
@@ -52,15 +67,9 @@ IMAGE_PROPERTIES_PRIVATE_DATA  mImagePropertiesPrivateData = {
   INITIALIZE_LIST_HEAD_VARIABLE (mImagePropertiesPrivateData.ImageRecordList)
 };
 
-EFI_PROPERTIES_TABLE  mPropertiesTable = {
-  EFI_PROPERTIES_TABLE_VERSION,
-  sizeof(EFI_PROPERTIES_TABLE),
-  EFI_PROPERTIES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA
-};
+#define EFI_MEMORY_ATTRIBUTES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA  BIT0
 
-EFI_LOCK           mPropertiesTableLock = EFI_INITIALIZE_LOCK_VARIABLE (TPL_NOTIFY);
-
-BOOLEAN            mPropertiesTableEnable;
+UINT64 mMemoryProtectionAttribute = EFI_MEMORY_ATTRIBUTES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA;
 
 //
 // Below functions are for MemoryMap
@@ -71,7 +80,7 @@ BOOLEAN            mPropertiesTableEnable;
 
   NOTE: Do not use EFI_PAGES_TO_SIZE because it handles UINTN only.
 
-  @param  Pages     The number of EFI_PAGES.
+  @param[in]  Pages     The number of EFI_PAGES.
 
   @return  The number of bytes associated with the number of EFI_PAGEs specified
            by Pages.
@@ -90,7 +99,7 @@ EfiPagesToSize (
 
   NOTE: Do not use EFI_SIZE_TO_PAGES because it handles UINTN only.
 
-  @param  Size      A size in bytes.
+  @param[in]  Size      A size in bytes.
 
   @return  The number of EFI_PAGESs associated with the number of bytes specified
            by Size.
@@ -106,36 +115,41 @@ EfiSizeToPages (
 }
 
 /**
-  Acquire memory lock on mPropertiesTableLock.
-**/
-STATIC
-VOID
-CoreAcquirePropertiesTableLock (
-  VOID
-  )
-{
-  CoreAcquireLock (&mPropertiesTableLock);
-}
+  Check the consistency of Smm memory attributes table.
 
-/**
-  Release memory lock on mPropertiesTableLock.
+  @param[in] MemoryAttributesTable  PI SMM memory attributes table
 **/
-STATIC
 VOID
-CoreReleasePropertiesTableLock (
-  VOID
+SmmMemoryAttributesTableConsistencyCheck (
+  IN EDKII_PI_SMM_MEMORY_ATTRIBUTES_TABLE *MemoryAttributesTable
   )
 {
-  CoreReleaseLock (&mPropertiesTableLock);
+  EFI_MEMORY_DESCRIPTOR                     *MemoryMap;
+  UINTN                                     MemoryMapEntryCount;
+  UINTN                                     DescriptorSize;
+  UINTN                                     Index;
+  UINT64                                    Address;
+
+  Address = 0;
+  MemoryMapEntryCount = MemoryAttributesTable->NumberOfEntries;
+  DescriptorSize = MemoryAttributesTable->DescriptorSize;
+  MemoryMap = (EFI_MEMORY_DESCRIPTOR *)(MemoryAttributesTable + 1);
+  for (Index = 0; Index < MemoryMapEntryCount; Index++) {
+    if (Address != 0) {
+      ASSERT (Address == MemoryMap->PhysicalStart);
+    }
+    Address = MemoryMap->PhysicalStart + EfiPagesToSize(MemoryMap->NumberOfPages);
+    MemoryMap = NEXT_MEMORY_DESCRIPTOR(MemoryMap, DescriptorSize);
+  }
 }
 
 /**
   Sort memory map entries based upon PhysicalStart, from low to high.
 
-  @param  MemoryMap              A pointer to the buffer in which firmware places
-                                 the current memory map.
-  @param  MemoryMapSize          Size, in bytes, of the MemoryMap buffer.
-  @param  DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
+  @param[in,out]  MemoryMap         A pointer to the buffer in which firmware places
+                                    the current memory map.
+  @param[in]      MemoryMapSize     Size, in bytes, of the MemoryMap buffer.
+  @param[in]      DescriptorSize    Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
 **/
 STATIC
 VOID
@@ -174,13 +188,13 @@ SortMemoryMap (
 /**
   Merge continous memory map entries whose have same attributes.
 
-  @param  MemoryMap              A pointer to the buffer in which firmware places
-                                 the current memory map.
-  @param  MemoryMapSize          A pointer to the size, in bytes, of the
-                                 MemoryMap buffer. On input, this is the size of
-                                 the current memory map.  On output,
-                                 it is the size of new memory map after merge.
-  @param  DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
+  @param[in, out]  MemoryMap              A pointer to the buffer in which firmware places
+                                          the current memory map.
+  @param[in, out]  MemoryMapSize          A pointer to the size, in bytes, of the
+                                          MemoryMap buffer. On input, this is the size of
+                                          the current memory map.  On output,
+                                          it is the size of new memory map after merge.
+  @param[in]       DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
 **/
 STATIC
 VOID
@@ -235,10 +249,10 @@ MergeMemoryMap (
   Enforce memory map attributes.
   This function will set EfiRuntimeServicesData/EfiMemoryMappedIO/EfiMemoryMappedIOPortSpace to be EFI_MEMORY_XP.
 
-  @param  MemoryMap              A pointer to the buffer in which firmware places
-                                 the current memory map.
-  @param  MemoryMapSize          Size, in bytes, of the MemoryMap buffer.
-  @param  DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
+  @param[in, out]  MemoryMap              A pointer to the buffer in which firmware places
+                                          the current memory map.
+  @param[in]       MemoryMapSize          Size, in bytes, of the MemoryMap buffer.
+  @param[in]       DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
 **/
 STATIC
 VOID
@@ -254,20 +268,19 @@ EnforceMemoryMapAttribute (
   MemoryMapEntry = MemoryMap;
   MemoryMapEnd   = (EFI_MEMORY_DESCRIPTOR *) ((UINT8 *) MemoryMap + MemoryMapSize);
   while ((UINTN)MemoryMapEntry < (UINTN)MemoryMapEnd) {
-    switch (MemoryMapEntry->Type) {
-    case EfiRuntimeServicesCode:
-      // do nothing
-      break;
-    case EfiRuntimeServicesData:
-    case EfiMemoryMappedIO:
-    case EfiMemoryMappedIOPortSpace:
-      MemoryMapEntry->Attribute |= EFI_MEMORY_XP;
-      break;
-    case EfiReservedMemoryType:
-    case EfiACPIMemoryNVS:
-      break;
+    if (MemoryMapEntry->Attribute != 0) {
+      // It is PE image, the attribute is already set.
+    } else {
+      switch (MemoryMapEntry->Type) {
+      case EfiRuntimeServicesCode:
+        MemoryMapEntry->Attribute = EFI_MEMORY_RO;
+        break;
+      case EfiRuntimeServicesData:
+      default:
+        MemoryMapEntry->Attribute |= EFI_MEMORY_XP;
+        break;
+      }
     }
-
     MemoryMapEntry = NEXT_MEMORY_DESCRIPTOR (MemoryMapEntry, DescriptorSize);
   }
 
@@ -277,8 +290,8 @@ EnforceMemoryMapAttribute (
 /**
   Return the first image record, whose [ImageBase, ImageSize] covered by [Buffer, Length].
 
-  @param Buffer  Start Address
-  @param Length  Address length
+  @param[in] Buffer  Start Address
+  @param[in] Length  Address length
 
   @return first image record covered by [buffer, length]
 **/
@@ -318,14 +331,14 @@ GetImageRecordByAddress (
   Set the memory map to new entries, according to one old entry,
   based upon PE code section and data section in image record
 
-  @param  ImageRecord            An image record whose [ImageBase, ImageSize] covered
-                                 by old memory map entry.
-  @param  NewRecord              A pointer to several new memory map entries.
-                                 The caller gurantee the buffer size be 1 +
-                                 (SplitRecordCount * DescriptorSize) calculated
-                                 below.
-  @param  OldRecord              A pointer to one old memory map entry.
-  @param  DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
+  @param[in]       ImageRecord            An image record whose [ImageBase, ImageSize] covered
+                                          by old memory map entry.
+  @param[in, out]  NewRecord              A pointer to several new memory map entries.
+                                          The caller gurantee the buffer size be 1 +
+                                          (SplitRecordCount * DescriptorSize) calculated
+                                          below.
+  @param[in]       OldRecord              A pointer to one old memory map entry.
+  @param[in]       DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
 **/
 STATIC
 UINTN
@@ -349,6 +362,21 @@ SetNewRecord (
   PhysicalEnd = TempRecord.PhysicalStart + EfiPagesToSize(TempRecord.NumberOfPages);
   NewRecordCount = 0;
 
+  //
+  // Always create a new entry for non-PE image record
+  //
+  if (ImageRecord->ImageBase > TempRecord.PhysicalStart) {
+    NewRecord->Type = TempRecord.Type;
+    NewRecord->PhysicalStart = TempRecord.PhysicalStart;
+    NewRecord->VirtualStart  = 0;
+    NewRecord->NumberOfPages = EfiSizeToPages(ImageRecord->ImageBase - TempRecord.PhysicalStart);
+    NewRecord->Attribute     = TempRecord.Attribute;
+    NewRecord = NEXT_MEMORY_DESCRIPTOR (NewRecord, DescriptorSize);
+    NewRecordCount ++;
+    TempRecord.PhysicalStart = ImageRecord->ImageBase;
+    TempRecord.NumberOfPages = EfiSizeToPages(PhysicalEnd - TempRecord.PhysicalStart);
+  }
+
   ImageRecordCodeSectionList = &ImageRecord->CodeSegmentList;
 
   ImageRecordCodeSectionLink = ImageRecordCodeSectionList->ForwardLink;
@@ -366,11 +394,7 @@ SetNewRecord (
       //
       // DATA
       //
-      if (!mPropertiesTableEnable) {
-        NewRecord->Type = TempRecord.Type;
-      } else {
-        NewRecord->Type = EfiRuntimeServicesData;
-      }
+      NewRecord->Type = EfiRuntimeServicesData;
       NewRecord->PhysicalStart = TempRecord.PhysicalStart;
       NewRecord->VirtualStart  = 0;
       NewRecord->NumberOfPages = EfiSizeToPages(ImageRecordCodeSection->CodeSegmentBase - NewRecord->PhysicalStart);
@@ -383,11 +407,7 @@ SetNewRecord (
       //
       // CODE
       //
-      if (!mPropertiesTableEnable) {
-        NewRecord->Type = TempRecord.Type;
-      } else {
-        NewRecord->Type = EfiRuntimeServicesCode;
-      }
+      NewRecord->Type = EfiRuntimeServicesCode;
       NewRecord->PhysicalStart = ImageRecordCodeSection->CodeSegmentBase;
       NewRecord->VirtualStart  = 0;
       NewRecord->NumberOfPages = EfiSizeToPages(ImageRecordCodeSection->CodeSegmentSize);
@@ -411,11 +431,7 @@ SetNewRecord (
   // Final DATA
   //
   if (TempRecord.PhysicalStart < ImageEnd) {
-    if (!mPropertiesTableEnable) {
-      NewRecord->Type = TempRecord.Type;
-    } else {
-      NewRecord->Type = EfiRuntimeServicesData;
-    }
+    NewRecord->Type = EfiRuntimeServicesData;
     NewRecord->PhysicalStart = TempRecord.PhysicalStart;
     NewRecord->VirtualStart  = 0;
     NewRecord->NumberOfPages = EfiSizeToPages (ImageEnd - TempRecord.PhysicalStart);
@@ -430,7 +446,7 @@ SetNewRecord (
   Return the max number of new splitted entries, according to one old entry,
   based upon PE code section and data section.
 
-  @param  OldRecord              A pointer to one old memory map entry.
+  @param[in]  OldRecord              A pointer to one old memory map entry.
 
   @retval  0 no entry need to be splitted.
   @return  the max number of new splitted entries
@@ -455,13 +471,9 @@ GetMaxSplitRecordCount (
     if (ImageRecord == NULL) {
       break;
     }
-    SplitRecordCount += (2 * ImageRecord->CodeSegmentCount + 1);
+    SplitRecordCount += (2 * ImageRecord->CodeSegmentCount + 2);
     PhysicalStart = ImageRecord->ImageBase + ImageRecord->ImageSize;
   } while ((ImageRecord != NULL) && (PhysicalStart < PhysicalEnd));
-
-  if (SplitRecordCount != 0) {
-    SplitRecordCount--;
-  }
 
   return SplitRecordCount;
 }
@@ -470,13 +482,13 @@ GetMaxSplitRecordCount (
   Split the memory map to new entries, according to one old entry,
   based upon PE code section and data section.
 
-  @param  OldRecord              A pointer to one old memory map entry.
-  @param  NewRecord              A pointer to several new memory map entries.
-                                 The caller gurantee the buffer size be 1 +
-                                 (SplitRecordCount * DescriptorSize) calculated
-                                 below.
-  @param  MaxSplitRecordCount    The max number of splitted entries
-  @param  DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
+  @param[in]       OldRecord              A pointer to one old memory map entry.
+  @param[in, out]  NewRecord              A pointer to several new memory map entries.
+                                          The caller gurantee the buffer size be 1 +
+                                          (SplitRecordCount * DescriptorSize) calculated
+                                          below.
+  @param[in]       MaxSplitRecordCount    The max number of splitted entries
+  @param[in]       DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
 
   @retval  0 no entry is splitted.
   @return  the real number of splitted record.
@@ -497,7 +509,6 @@ SplitRecord (
   UINT64                  PhysicalEnd;
   UINTN                   NewRecordCount;
   UINTN                   TotalNewRecordCount;
-  BOOLEAN                 IsLastRecordData;
 
   if (MaxSplitRecordCount == 0) {
     CopyMem (NewRecord, OldRecord, DescriptorSize);
@@ -520,42 +531,16 @@ SplitRecord (
       //
       // No more image covered by this range, stop
       //
-      if ((PhysicalEnd > PhysicalStart) && (ImageRecord != NULL)) {
+      if (PhysicalEnd > PhysicalStart) {
         //
-        // If this is still address in this record, need record.
+        // Always create a new entry for non-PE image record
         //
-        NewRecord = PREVIOUS_MEMORY_DESCRIPTOR (NewRecord, DescriptorSize);
-        IsLastRecordData = FALSE;
-        if (!mPropertiesTableEnable) {
-          if ((NewRecord->Attribute & EFI_MEMORY_XP) != 0) {
-            IsLastRecordData = TRUE;
-          }
-        } else {
-          if (NewRecord->Type == EfiRuntimeServicesData) {
-            IsLastRecordData = TRUE;
-          }
-        }
-        if (IsLastRecordData) {
-          //
-          // Last record is DATA, just merge it.
-          //
-          NewRecord->NumberOfPages = EfiSizeToPages(PhysicalEnd - NewRecord->PhysicalStart);
-        } else {
-          //
-          // Last record is CODE, create a new DATA entry.
-          //
-          NewRecord = NEXT_MEMORY_DESCRIPTOR (NewRecord, DescriptorSize);
-          if (!mPropertiesTableEnable) {
-            NewRecord->Type = TempRecord.Type;
-          } else {
-            NewRecord->Type = EfiRuntimeServicesData;
-          }
-          NewRecord->PhysicalStart = TempRecord.PhysicalStart;
-          NewRecord->VirtualStart  = 0;
-          NewRecord->NumberOfPages = TempRecord.NumberOfPages;
-          NewRecord->Attribute     = TempRecord.Attribute | EFI_MEMORY_XP;
-          TotalNewRecordCount ++;
-        }
+        NewRecord->Type = TempRecord.Type;
+        NewRecord->PhysicalStart = TempRecord.PhysicalStart;
+        NewRecord->VirtualStart  = 0;
+        NewRecord->NumberOfPages = TempRecord.NumberOfPages;
+        NewRecord->Attribute     = TempRecord.Attribute;
+        TotalNewRecordCount ++;
       }
       break;
     }
@@ -598,6 +583,8 @@ SplitRecord (
    ==>
    +---------------+
    | Record X      |
+   +---------------+
+   | Record RtCode |
    +---------------+ ----
    | Record RtData |     |
    +---------------+     |
@@ -605,25 +592,29 @@ SplitRecord (
    +---------------+     |
    | Record RtData |     |
    +---------------+ ----
+   | Record RtCode |
+   +---------------+ ----
    | Record RtData |     |
    +---------------+     |
    | Record RtCode |     |-> PE/COFF2
    +---------------+     |
    | Record RtData |     |
    +---------------+ ----
+   | Record RtCode |
+   +---------------+
    | Record Y      |
    +---------------+
 
-  @param  MemoryMapSize          A pointer to the size, in bytes, of the
-                                 MemoryMap buffer. On input, this is the size of
-                                 old MemoryMap before split. The actual buffer
-                                 size of MemoryMap is MemoryMapSize +
-                                 (AdditionalRecordCount * DescriptorSize) calculated
-                                 below. On output, it is the size of new MemoryMap
-                                 after split.
-  @param  MemoryMap              A pointer to the buffer in which firmware places
-                                 the current memory map.
-  @param  DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
+  @param[in, out]  MemoryMapSize          A pointer to the size, in bytes, of the
+                                          MemoryMap buffer. On input, this is the size of
+                                          old MemoryMap before split. The actual buffer
+                                          size of MemoryMap is MemoryMapSize +
+                                          (AdditionalRecordCount * DescriptorSize) calculated
+                                          below. On output, it is the size of new MemoryMap
+                                          after split.
+  @param[in, out]  MemoryMap              A pointer to the buffer in which firmware places
+                                          the current memory map.
+  @param[in]       DescriptorSize         Size, in bytes, of an individual EFI_MEMORY_DESCRIPTOR.
 **/
 STATIC
 VOID
@@ -640,7 +631,7 @@ SplitTable (
   UINTN       TotalSplitRecordCount;
   UINTN       AdditionalRecordCount;
 
-  AdditionalRecordCount = (2 * mImagePropertiesPrivateData.CodeSegmentCountMax + 1) * mImagePropertiesPrivateData.ImageRecordCount;
+  AdditionalRecordCount = (2 * mImagePropertiesPrivateData.CodeSegmentCountMax + 2) * mImagePropertiesPrivateData.ImageRecordCount;
 
   TotalSplitRecordCount = 0;
   //
@@ -666,11 +657,13 @@ SplitTable (
     //
     // Adjust IndexNew according to real split.
     //
-    CopyMem (
-      ((UINT8 *)MemoryMap + (IndexNew + MaxSplitRecordCount - RealSplitRecordCount) * DescriptorSize),
-      ((UINT8 *)MemoryMap + IndexNew * DescriptorSize),
-      RealSplitRecordCount * DescriptorSize
-      );
+    if (MaxSplitRecordCount != RealSplitRecordCount) {
+      CopyMem (
+        ((UINT8 *)MemoryMap + (IndexNew + MaxSplitRecordCount - RealSplitRecordCount) * DescriptorSize),
+        ((UINT8 *)MemoryMap + IndexNew * DescriptorSize),
+        (RealSplitRecordCount + 1) * DescriptorSize
+        );
+    }
     IndexNew = IndexNew + MaxSplitRecordCount - RealSplitRecordCount;
     TotalSplitRecordCount += RealSplitRecordCount;
     IndexNew --;
@@ -705,28 +698,28 @@ SplitTable (
 }
 
 /**
-  This function for GetMemoryMap() with properties table capability.
+  This function for GetMemoryMap() with memory attributes table.
 
   It calls original GetMemoryMap() to get the original memory map information. Then
   plus the additional memory map entries for PE Code/Data seperation.
 
-  @param  MemoryMapSize          A pointer to the size, in bytes, of the
-                                 MemoryMap buffer. On input, this is the size of
-                                 the buffer allocated by the caller.  On output,
-                                 it is the size of the buffer returned by the
-                                 firmware  if the buffer was large enough, or the
-                                 size of the buffer needed  to contain the map if
-                                 the buffer was too small.
-  @param  MemoryMap              A pointer to the buffer in which firmware places
-                                 the current memory map.
-  @param  MapKey                 A pointer to the location in which firmware
-                                 returns the key for the current memory map.
-  @param  DescriptorSize         A pointer to the location in which firmware
-                                 returns the size, in bytes, of an individual
-                                 EFI_MEMORY_DESCRIPTOR.
-  @param  DescriptorVersion      A pointer to the location in which firmware
-                                 returns the version number associated with the
-                                 EFI_MEMORY_DESCRIPTOR.
+  @param[in, out]  MemoryMapSize          A pointer to the size, in bytes, of the
+                                          MemoryMap buffer. On input, this is the size of
+                                          the buffer allocated by the caller.  On output,
+                                          it is the size of the buffer returned by the
+                                          firmware  if the buffer was large enough, or the
+                                          size of the buffer needed  to contain the map if
+                                          the buffer was too small.
+  @param[in, out]  MemoryMap              A pointer to the buffer in which firmware places
+                                          the current memory map.
+  @param[out]      MapKey                 A pointer to the location in which firmware
+                                          returns the key for the current memory map.
+  @param[out]      DescriptorSize         A pointer to the location in which firmware
+                                          returns the size, in bytes, of an individual
+                                          EFI_MEMORY_DESCRIPTOR.
+  @param[out]      DescriptorVersion      A pointer to the location in which firmware
+                                          returns the version number associated with the
+                                          EFI_MEMORY_DESCRIPTOR.
 
   @retval EFI_SUCCESS            The memory map was returned in the MemoryMap
                                  buffer.
@@ -736,9 +729,10 @@ SplitTable (
   @retval EFI_INVALID_PARAMETER  One of the parameters has an invalid value.
 
 **/
+STATIC
 EFI_STATUS
 EFIAPI
-CoreGetMemoryMapWithSeparatedImageSection (
+SmmCoreGetMemoryMapMemoryAttributesTable (
   IN OUT UINTN                  *MemoryMapSize,
   IN OUT EFI_MEMORY_DESCRIPTOR  *MemoryMap,
   OUT UINTN                     *MapKey,
@@ -753,24 +747,21 @@ CoreGetMemoryMapWithSeparatedImageSection (
   //
   // If PE code/data is not aligned, just return.
   //
-  if ((mPropertiesTable.MemoryProtectionAttribute & EFI_PROPERTIES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA) == 0) {
-    return CoreGetMemoryMap (MemoryMapSize, MemoryMap, MapKey, DescriptorSize, DescriptorVersion);
+  if ((mMemoryProtectionAttribute & EFI_MEMORY_ATTRIBUTES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA) == 0) {
+    return SmmCoreGetMemoryMap (MemoryMapSize, MemoryMap, MapKey, DescriptorSize, DescriptorVersion);
   }
 
   if (MemoryMapSize == NULL) {
     return EFI_INVALID_PARAMETER;
   }
 
-  CoreAcquirePropertiesTableLock ();
-
-  AdditionalRecordCount = (2 * mImagePropertiesPrivateData.CodeSegmentCountMax + 1) * mImagePropertiesPrivateData.ImageRecordCount;
+  AdditionalRecordCount = (2 * mImagePropertiesPrivateData.CodeSegmentCountMax + 2) * mImagePropertiesPrivateData.ImageRecordCount;
 
   OldMemoryMapSize = *MemoryMapSize;
-  Status = CoreGetMemoryMap (MemoryMapSize, MemoryMap, MapKey, DescriptorSize, DescriptorVersion);
+  Status = SmmCoreGetMemoryMap (MemoryMapSize, MemoryMap, MapKey, DescriptorSize, DescriptorVersion);
   if (Status == EFI_BUFFER_TOO_SMALL) {
     *MemoryMapSize = *MemoryMapSize + (*DescriptorSize) * AdditionalRecordCount;
   } else if (Status == EFI_SUCCESS) {
-    ASSERT (MemoryMap != NULL);
     if (OldMemoryMapSize - *MemoryMapSize < (*DescriptorSize) * AdditionalRecordCount) {
       *MemoryMapSize = *MemoryMapSize + (*DescriptorSize) * AdditionalRecordCount;
       //
@@ -781,11 +772,11 @@ CoreGetMemoryMapWithSeparatedImageSection (
       //
       // Split PE code/data
       //
+      ASSERT(MemoryMap != NULL);
       SplitTable (MemoryMapSize, MemoryMap, *DescriptorSize);
     }
   }
 
-  CoreReleasePropertiesTableLock ();
   return Status;
 }
 
@@ -794,31 +785,28 @@ CoreGetMemoryMapWithSeparatedImageSection (
 //
 
 /**
-  Set PropertiesTable according to PE/COFF image section alignment.
+  Set MemoryProtectionAttribute according to PE/COFF image section alignment.
 
-  @param  SectionAlignment    PE/COFF section alignment
+  @param[in]  SectionAlignment    PE/COFF section alignment
 **/
 STATIC
 VOID
-SetPropertiesTableSectionAlignment (
+SetMemoryAttributesTableSectionAlignment (
   IN UINT32  SectionAlignment
   )
 {
   if (((SectionAlignment & (EFI_ACPI_RUNTIME_PAGE_ALLOCATION_ALIGNMENT - 1)) != 0) &&
-      ((mPropertiesTable.MemoryProtectionAttribute & EFI_PROPERTIES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA) != 0)) {
-    DEBUG ((EFI_D_VERBOSE, "SetPropertiesTableSectionAlignment - Clear\n"));
-    mPropertiesTable.MemoryProtectionAttribute &= ~((UINT64)EFI_PROPERTIES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA);
-    gBS->GetMemoryMap = CoreGetMemoryMap;
-    gBS->Hdr.CRC32 = 0;
-    gBS->CalculateCrc32 ((UINT8 *)gBS, gBS->Hdr.HeaderSize, &gBS->Hdr.CRC32);
+      ((mMemoryProtectionAttribute & EFI_MEMORY_ATTRIBUTES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA) != 0)) {
+    DEBUG ((DEBUG_VERBOSE, "SMM SetMemoryAttributesTableSectionAlignment - Clear\n"));
+    mMemoryProtectionAttribute &= ~((UINT64)EFI_MEMORY_ATTRIBUTES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA);
   }
 }
 
 /**
   Swap two code sections in image record.
 
-  @param  FirstImageRecordCodeSection    first code section in image record
-  @param  SecondImageRecordCodeSection   second code section in image record
+  @param[in]  FirstImageRecordCodeSection    first code section in image record
+  @param[in]  SecondImageRecordCodeSection   second code section in image record
 **/
 STATIC
 VOID
@@ -842,8 +830,9 @@ SwapImageRecordCodeSection (
 /**
   Sort code section in image record, based upon CodeSegmentBase from low to high.
 
-  @param  ImageRecord    image record to be sorted
+  @param[in]  ImageRecord    image record to be sorted
 **/
+STATIC
 VOID
 SortImageRecordCodeSection (
   IN IMAGE_PROPERTIES_RECORD              *ImageRecord
@@ -889,11 +878,12 @@ SortImageRecordCodeSection (
 /**
   Check if code section in image record is valid.
 
-  @param  ImageRecord    image record to be checked
+  @param[in]  ImageRecord    image record to be checked
 
   @retval TRUE  image record is valid
   @retval FALSE image record is invalid
 **/
+STATIC
 BOOLEAN
 IsImageRecordCodeSectionValid (
   IN IMAGE_PROPERTIES_RECORD              *ImageRecord
@@ -905,7 +895,7 @@ IsImageRecordCodeSectionValid (
   LIST_ENTRY                                *ImageRecordCodeSectionEndLink;
   LIST_ENTRY                                *ImageRecordCodeSectionList;
 
-  DEBUG ((EFI_D_VERBOSE, "ImageCode SegmentCount - 0x%x\n", ImageRecord->CodeSegmentCount));
+  DEBUG ((DEBUG_VERBOSE, "SMM ImageCode SegmentCount - 0x%x\n", ImageRecord->CodeSegmentCount));
 
   ImageRecordCodeSectionList = &ImageRecord->CodeSegmentList;
 
@@ -947,8 +937,8 @@ IsImageRecordCodeSectionValid (
 /**
   Swap two image records.
 
-  @param  FirstImageRecord   first image record.
-  @param  SecondImageRecord  second image record.
+  @param[in]  FirstImageRecord   first image record.
+  @param[in]  SecondImageRecord  second image record.
 **/
 STATIC
 VOID
@@ -1045,18 +1035,18 @@ DumpImageRecord (
                     Link,
                     IMAGE_PROPERTIES_RECORD_SIGNATURE
                     );
-    DEBUG ((EFI_D_VERBOSE, "  Image[%d]: 0x%016lx - 0x%016lx\n", Index, ImageRecord->ImageBase, ImageRecord->ImageSize));
+    DEBUG ((DEBUG_VERBOSE, "SMM  Image[%d]: 0x%016lx - 0x%016lx\n", Index, ImageRecord->ImageBase, ImageRecord->ImageSize));
   }
 }
 
 /**
   Insert image record.
 
-  @param  RuntimeImage    Runtime image information
+  @param[in]  DriverEntry    Driver information
 **/
 VOID
-InsertImageRecord (
-  IN EFI_RUNTIME_IMAGE_ENTRY  *RuntimeImage
+SmmInsertImageRecord (
+  IN EFI_SMM_DRIVER_ENTRY  *DriverEntry
   )
 {
   VOID                                 *ImageAddress;
@@ -1072,8 +1062,8 @@ InsertImageRecord (
   IMAGE_PROPERTIES_RECORD_CODE_SECTION *ImageRecordCodeSection;
   UINT16                               Magic;
 
-  DEBUG ((EFI_D_VERBOSE, "InsertImageRecord - 0x%x\n", RuntimeImage));
-  DEBUG ((EFI_D_VERBOSE, "InsertImageRecord - 0x%016lx - 0x%016lx\n", (EFI_PHYSICAL_ADDRESS)(UINTN)RuntimeImage->ImageBase, RuntimeImage->ImageSize));
+  DEBUG ((DEBUG_VERBOSE, "SMM InsertImageRecord - 0x%x\n", DriverEntry));
+  DEBUG ((DEBUG_VERBOSE, "SMM InsertImageRecord - 0x%016lx - 0x%08x\n", DriverEntry->ImageBuffer, DriverEntry->NumberOfPage));
 
   ImageRecord = AllocatePool (sizeof(*ImageRecord));
   if (ImageRecord == NULL) {
@@ -1081,19 +1071,19 @@ InsertImageRecord (
   }
   ImageRecord->Signature = IMAGE_PROPERTIES_RECORD_SIGNATURE;
 
-  DEBUG ((EFI_D_VERBOSE, "ImageRecordCount - 0x%x\n", mImagePropertiesPrivateData.ImageRecordCount));
+  DEBUG ((DEBUG_VERBOSE, "SMM ImageRecordCount - 0x%x\n", mImagePropertiesPrivateData.ImageRecordCount));
 
   //
   // Step 1: record whole region
   //
-  ImageRecord->ImageBase = (EFI_PHYSICAL_ADDRESS)(UINTN)RuntimeImage->ImageBase;
-  ImageRecord->ImageSize = RuntimeImage->ImageSize;
+  ImageRecord->ImageBase = DriverEntry->ImageBuffer;
+  ImageRecord->ImageSize = EfiPagesToSize(DriverEntry->NumberOfPage);
 
-  ImageAddress = RuntimeImage->ImageBase;
+  ImageAddress = (VOID *)(UINTN)DriverEntry->ImageBuffer;
 
   PdbPointer = PeCoffLoaderGetPdbPointer ((VOID*) (UINTN) ImageAddress);
   if (PdbPointer != NULL) {
-    DEBUG ((EFI_D_VERBOSE, "  Image - %a\n", PdbPointer));
+    DEBUG ((DEBUG_VERBOSE, "SMM   Image - %a\n", PdbPointer));
   }
 
   //
@@ -1107,8 +1097,7 @@ InsertImageRecord (
 
   Hdr.Pe32 = (EFI_IMAGE_NT_HEADERS32 *)((UINT8 *) (UINTN) ImageAddress + PeCoffHeaderOffset);
   if (Hdr.Pe32->Signature != EFI_IMAGE_NT_SIGNATURE) {
-    DEBUG ((EFI_D_VERBOSE, "Hdr.Pe32->Signature invalid - 0x%x\n", Hdr.Pe32->Signature));
-    // It might be image in SMM.
+    DEBUG ((DEBUG_VERBOSE, "SMM Hdr.Pe32->Signature invalid - 0x%x\n", Hdr.Pe32->Signature));
     goto Finish;
   }
 
@@ -1135,13 +1124,13 @@ InsertImageRecord (
     SectionAlignment  = Hdr.Pe32Plus->OptionalHeader.SectionAlignment;
   }
 
-  SetPropertiesTableSectionAlignment (SectionAlignment);
+  SetMemoryAttributesTableSectionAlignment (SectionAlignment);
   if ((SectionAlignment & (EFI_ACPI_RUNTIME_PAGE_ALLOCATION_ALIGNMENT - 1)) != 0) {
-    DEBUG ((EFI_D_WARN, "!!!!!!!!  InsertImageRecord - Section Alignment(0x%x) is not %dK  !!!!!!!!\n",
+    DEBUG ((DEBUG_WARN, "SMM !!!!!!!!  InsertImageRecord - Section Alignment(0x%x) is not %dK  !!!!!!!!\n",
       SectionAlignment, EFI_ACPI_RUNTIME_PAGE_ALLOCATION_ALIGNMENT >> 10));
     PdbPointer = PeCoffLoaderGetPdbPointer ((VOID*) (UINTN) ImageAddress);
     if (PdbPointer != NULL) {
-      DEBUG ((EFI_D_WARN, "!!!!!!!!  Image - %a  !!!!!!!!\n", PdbPointer));
+      DEBUG ((DEBUG_WARN, "SMM !!!!!!!!  Image - %a  !!!!!!!!\n", PdbPointer));
     }
     goto Finish;
   }
@@ -1158,8 +1147,8 @@ InsertImageRecord (
   for (Index = 0; Index < Hdr.Pe32->FileHeader.NumberOfSections; Index++) {
     Name = Section[Index].Name;
     DEBUG ((
-      EFI_D_VERBOSE,
-      "  Section - '%c%c%c%c%c%c%c%c'\n",
+      DEBUG_VERBOSE,
+      "SMM   Section - '%c%c%c%c%c%c%c%c'\n",
       Name[0],
       Name[1],
       Name[2],
@@ -1171,15 +1160,15 @@ InsertImageRecord (
       ));
 
     if ((Section[Index].Characteristics & EFI_IMAGE_SCN_CNT_CODE) != 0) {
-      DEBUG ((EFI_D_VERBOSE, "  VirtualSize          - 0x%08x\n", Section[Index].Misc.VirtualSize));
-      DEBUG ((EFI_D_VERBOSE, "  VirtualAddress       - 0x%08x\n", Section[Index].VirtualAddress));
-      DEBUG ((EFI_D_VERBOSE, "  SizeOfRawData        - 0x%08x\n", Section[Index].SizeOfRawData));
-      DEBUG ((EFI_D_VERBOSE, "  PointerToRawData     - 0x%08x\n", Section[Index].PointerToRawData));
-      DEBUG ((EFI_D_VERBOSE, "  PointerToRelocations - 0x%08x\n", Section[Index].PointerToRelocations));
-      DEBUG ((EFI_D_VERBOSE, "  PointerToLinenumbers - 0x%08x\n", Section[Index].PointerToLinenumbers));
-      DEBUG ((EFI_D_VERBOSE, "  NumberOfRelocations  - 0x%08x\n", Section[Index].NumberOfRelocations));
-      DEBUG ((EFI_D_VERBOSE, "  NumberOfLinenumbers  - 0x%08x\n", Section[Index].NumberOfLinenumbers));
-      DEBUG ((EFI_D_VERBOSE, "  Characteristics      - 0x%08x\n", Section[Index].Characteristics));
+      DEBUG ((DEBUG_VERBOSE, "SMM   VirtualSize          - 0x%08x\n", Section[Index].Misc.VirtualSize));
+      DEBUG ((DEBUG_VERBOSE, "SMM   VirtualAddress       - 0x%08x\n", Section[Index].VirtualAddress));
+      DEBUG ((DEBUG_VERBOSE, "SMM   SizeOfRawData        - 0x%08x\n", Section[Index].SizeOfRawData));
+      DEBUG ((DEBUG_VERBOSE, "SMM   PointerToRawData     - 0x%08x\n", Section[Index].PointerToRawData));
+      DEBUG ((DEBUG_VERBOSE, "SMM   PointerToRelocations - 0x%08x\n", Section[Index].PointerToRelocations));
+      DEBUG ((DEBUG_VERBOSE, "SMM   PointerToLinenumbers - 0x%08x\n", Section[Index].PointerToLinenumbers));
+      DEBUG ((DEBUG_VERBOSE, "SMM   NumberOfRelocations  - 0x%08x\n", Section[Index].NumberOfRelocations));
+      DEBUG ((DEBUG_VERBOSE, "SMM   NumberOfLinenumbers  - 0x%08x\n", Section[Index].NumberOfLinenumbers));
+      DEBUG ((DEBUG_VERBOSE, "SMM   Characteristics      - 0x%08x\n", Section[Index].Characteristics));
 
       //
       // Step 2: record code section
@@ -1193,7 +1182,7 @@ InsertImageRecord (
       ImageRecordCodeSection->CodeSegmentBase = (UINTN)ImageAddress + Section[Index].VirtualAddress;
       ImageRecordCodeSection->CodeSegmentSize = Section[Index].SizeOfRawData;
 
-      DEBUG ((EFI_D_VERBOSE, "ImageCode: 0x%016lx - 0x%016lx\n", ImageRecordCodeSection->CodeSegmentBase, ImageRecordCodeSection->CodeSegmentSize));
+      DEBUG ((DEBUG_VERBOSE, "SMM ImageCode: 0x%016lx - 0x%016lx\n", ImageRecordCodeSection->CodeSegmentBase, ImageRecordCodeSection->CodeSegmentSize));
 
       InsertTailList (&ImageRecord->CodeSegmentList, &ImageRecordCodeSection->Link);
       ImageRecord->CodeSegmentCount++;
@@ -1201,11 +1190,11 @@ InsertImageRecord (
   }
 
   if (ImageRecord->CodeSegmentCount == 0) {
-    SetPropertiesTableSectionAlignment (1);
-    DEBUG ((EFI_D_ERROR, "!!!!!!!!  InsertImageRecord - CodeSegmentCount is 0  !!!!!!!!\n"));
+    SetMemoryAttributesTableSectionAlignment (1);
+    DEBUG ((DEBUG_ERROR, "SMM !!!!!!!!  InsertImageRecord - CodeSegmentCount is 0  !!!!!!!!\n"));
     PdbPointer = PeCoffLoaderGetPdbPointer ((VOID*) (UINTN) ImageAddress);
     if (PdbPointer != NULL) {
-      DEBUG ((EFI_D_ERROR, "!!!!!!!!  Image - %a  !!!!!!!!\n", PdbPointer));
+      DEBUG ((DEBUG_ERROR, "SMM !!!!!!!!  Image - %a  !!!!!!!!\n", PdbPointer));
     }
     goto Finish;
   }
@@ -1218,7 +1207,7 @@ InsertImageRecord (
   // Check overlap all section in ImageBase/Size
   //
   if (!IsImageRecordCodeSectionValid (ImageRecord)) {
-    DEBUG ((EFI_D_ERROR, "IsImageRecordCodeSectionValid - FAIL\n"));
+    DEBUG ((DEBUG_ERROR, "SMM IsImageRecordCodeSectionValid - FAIL\n"));
     goto Finish;
   }
 
@@ -1238,8 +1227,8 @@ Finish:
 /**
   Find image record according to image base and size.
 
-  @param  ImageBase    Base of PE image
-  @param  ImageSize    Size of PE image
+  @param[in]  ImageBase    Base of PE image
+  @param[in]  ImageSize    Size of PE image
 
   @return image record
 **/
@@ -1278,23 +1267,23 @@ FindImageRecord (
 /**
   Remove Image record.
 
-  @param  RuntimeImage    Runtime image information
+  @param[in]  DriverEntry    Driver information
 **/
 VOID
-RemoveImageRecord (
-  IN EFI_RUNTIME_IMAGE_ENTRY  *RuntimeImage
+SmmRemoveImageRecord (
+  IN EFI_SMM_DRIVER_ENTRY  *DriverEntry
   )
 {
   IMAGE_PROPERTIES_RECORD              *ImageRecord;
   LIST_ENTRY                           *CodeSegmentListHead;
   IMAGE_PROPERTIES_RECORD_CODE_SECTION *ImageRecordCodeSection;
 
-  DEBUG ((EFI_D_VERBOSE, "RemoveImageRecord - 0x%x\n", RuntimeImage));
-  DEBUG ((EFI_D_VERBOSE, "RemoveImageRecord - 0x%016lx - 0x%016lx\n", (EFI_PHYSICAL_ADDRESS)(UINTN)RuntimeImage->ImageBase, RuntimeImage->ImageSize));
+  DEBUG ((DEBUG_VERBOSE, "SMM RemoveImageRecord - 0x%x\n", DriverEntry));
+  DEBUG ((DEBUG_VERBOSE, "SMM RemoveImageRecord - 0x%016lx - 0x%016lx\n", DriverEntry->ImageBuffer, DriverEntry->NumberOfPage));
 
-  ImageRecord = FindImageRecord ((EFI_PHYSICAL_ADDRESS)(UINTN)RuntimeImage->ImageBase, RuntimeImage->ImageSize);
+  ImageRecord = FindImageRecord (DriverEntry->ImageBuffer, EfiPagesToSize(DriverEntry->NumberOfPage));
   if (ImageRecord == NULL) {
-    DEBUG ((EFI_D_ERROR, "!!!!!!!! ImageRecord not found !!!!!!!!\n"));
+    DEBUG ((DEBUG_ERROR, "SMM !!!!!!!! ImageRecord not found !!!!!!!!\n"));
     return ;
   }
 
@@ -1315,65 +1304,217 @@ RemoveImageRecord (
   mImagePropertiesPrivateData.ImageRecordCount--;
 }
 
-
 /**
-  Install PropertiesTable.
-
-  @param[in]  Event     The Event this notify function registered to.
-  @param[in]  Context   Pointer to the context data registered to the Event.
+  Publish MemoryAttributesTable to SMM configuration table.
 **/
 VOID
-EFIAPI
-InstallPropertiesTable (
-  EFI_EVENT                               Event,
-  VOID                                    *Context
-  )
-{
-  if (PcdGetBool (PcdPropertiesTableEnable)) {
-    EFI_STATUS  Status;
-
-    Status = gBS->InstallConfigurationTable (&gEfiPropertiesTableGuid, &mPropertiesTable);
-    ASSERT_EFI_ERROR (Status);
-
-    DEBUG ((EFI_D_INFO, "MemoryProtectionAttribute - 0x%016lx\n", mPropertiesTable.MemoryProtectionAttribute));
-    if ((mPropertiesTable.MemoryProtectionAttribute & EFI_PROPERTIES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA) == 0) {
-      DEBUG ((EFI_D_ERROR, "MemoryProtectionAttribute NON_EXECUTABLE_PE_DATA is not set, "));
-      DEBUG ((EFI_D_ERROR, "because Runtime Driver Section Alignment is not %dK.\n", EFI_ACPI_RUNTIME_PAGE_ALLOCATION_ALIGNMENT >> 10));
-      return ;
-    }
-
-    gBS->GetMemoryMap = CoreGetMemoryMapWithSeparatedImageSection;
-    gBS->Hdr.CRC32 = 0;
-    gBS->CalculateCrc32 ((UINT8 *)gBS, gBS->Hdr.HeaderSize, &gBS->Hdr.CRC32);
-
-    DEBUG ((EFI_D_VERBOSE, "Total Image Count - 0x%x\n", mImagePropertiesPrivateData.ImageRecordCount));
-    DEBUG ((EFI_D_VERBOSE, "Dump ImageRecord:\n"));
-    DumpImageRecord ();
-
-    mPropertiesTableEnable = TRUE;
-  }
-}
-
-/**
-  Initialize PropertiesTable support.
-**/
-VOID
-EFIAPI
-CoreInitializePropertiesTable (
+PublishMemoryAttributesTable (
   VOID
   )
 {
-  EFI_STATUS  Status;
-  EFI_EVENT   EndOfDxeEvent;
+  UINTN                                MemoryMapSize;
+  EFI_MEMORY_DESCRIPTOR                *MemoryMap;
+  UINTN                                MapKey;
+  UINTN                                DescriptorSize;
+  UINT32                               DescriptorVersion;
+  UINTN                                Index;
+  EFI_STATUS                           Status;
+  UINTN                                RuntimeEntryCount;
+  EDKII_PI_SMM_MEMORY_ATTRIBUTES_TABLE *MemoryAttributesTable;
+  EFI_MEMORY_DESCRIPTOR                *MemoryAttributesEntry;
+  UINTN                                MemoryAttributesTableSize;
 
-  Status = gBS->CreateEventEx (
-                  EVT_NOTIFY_SIGNAL,
-                  TPL_NOTIFY,
-                  InstallPropertiesTable,
-                  NULL,
-                  &gEfiEndOfDxeEventGroupGuid,
-                  &EndOfDxeEvent
-                  );
+  MemoryMapSize = 0;
+  MemoryMap = NULL;
+  Status = SmmCoreGetMemoryMapMemoryAttributesTable (
+             &MemoryMapSize,
+             MemoryMap,
+             &MapKey,
+             &DescriptorSize,
+             &DescriptorVersion
+             );
+  ASSERT (Status == EFI_BUFFER_TOO_SMALL);
+
+  do {
+    DEBUG ((DEBUG_INFO, "MemoryMapSize - 0x%x\n", MemoryMapSize));
+    MemoryMap = AllocatePool (MemoryMapSize);
+    ASSERT (MemoryMap != NULL);
+    DEBUG ((DEBUG_INFO, "MemoryMap - 0x%x\n", MemoryMap));
+
+    Status = SmmCoreGetMemoryMapMemoryAttributesTable (
+               &MemoryMapSize,
+               MemoryMap,
+               &MapKey,
+               &DescriptorSize,
+               &DescriptorVersion
+               );
+    if (EFI_ERROR (Status)) {
+      FreePool (MemoryMap);
+    }
+  } while (Status == EFI_BUFFER_TOO_SMALL);
+
+  //
+  // Allocate MemoryAttributesTable
+  //
+  RuntimeEntryCount = MemoryMapSize/DescriptorSize;
+  MemoryAttributesTableSize = sizeof(EDKII_PI_SMM_MEMORY_ATTRIBUTES_TABLE) + DescriptorSize * RuntimeEntryCount;
+  MemoryAttributesTable = AllocatePool (sizeof(EDKII_PI_SMM_MEMORY_ATTRIBUTES_TABLE) + DescriptorSize * RuntimeEntryCount);
+  ASSERT (MemoryAttributesTable != NULL);
+  MemoryAttributesTable->Version         = EDKII_PI_SMM_MEMORY_ATTRIBUTES_TABLE_VERSION;
+  MemoryAttributesTable->NumberOfEntries = (UINT32)RuntimeEntryCount;
+  MemoryAttributesTable->DescriptorSize  = (UINT32)DescriptorSize;
+  MemoryAttributesTable->Reserved        = 0;
+  DEBUG ((DEBUG_INFO, "MemoryAttributesTable:\n"));
+  DEBUG ((DEBUG_INFO, "  Version              - 0x%08x\n", MemoryAttributesTable->Version));
+  DEBUG ((DEBUG_INFO, "  NumberOfEntries      - 0x%08x\n", MemoryAttributesTable->NumberOfEntries));
+  DEBUG ((DEBUG_INFO, "  DescriptorSize       - 0x%08x\n", MemoryAttributesTable->DescriptorSize));
+  MemoryAttributesEntry = (EFI_MEMORY_DESCRIPTOR *)(MemoryAttributesTable + 1);
+  for (Index = 0; Index < MemoryMapSize/DescriptorSize; Index++) {
+    CopyMem (MemoryAttributesEntry, MemoryMap, DescriptorSize);
+    DEBUG ((DEBUG_INFO, "Entry (0x%x)\n", MemoryAttributesEntry));
+    DEBUG ((DEBUG_INFO, "  Type              - 0x%x\n", MemoryAttributesEntry->Type));
+    DEBUG ((DEBUG_INFO, "  PhysicalStart     - 0x%016lx\n", MemoryAttributesEntry->PhysicalStart));
+    DEBUG ((DEBUG_INFO, "  VirtualStart      - 0x%016lx\n", MemoryAttributesEntry->VirtualStart));
+    DEBUG ((DEBUG_INFO, "  NumberOfPages     - 0x%016lx\n", MemoryAttributesEntry->NumberOfPages));
+    DEBUG ((DEBUG_INFO, "  Attribute         - 0x%016lx\n", MemoryAttributesEntry->Attribute));
+    MemoryAttributesEntry = NEXT_MEMORY_DESCRIPTOR(MemoryAttributesEntry, DescriptorSize);
+
+    MemoryMap = NEXT_MEMORY_DESCRIPTOR(MemoryMap, DescriptorSize);
+  }
+
+  Status = gSmst->SmmInstallConfigurationTable (gSmst, &gEdkiiPiSmmMemoryAttributesTableGuid, MemoryAttributesTable, MemoryAttributesTableSize);
   ASSERT_EFI_ERROR (Status);
+}
+
+/**
+  This function returns if image is inside SMRAM.
+
+  @param[in] LoadedImage LoadedImage protocol instance for an image.
+
+  @retval TRUE  the image is inside SMRAM.
+  @retval FALSE the image is outside SMRAM.
+**/
+BOOLEAN
+IsImageInsideSmram (
+  IN EFI_LOADED_IMAGE_PROTOCOL   *LoadedImage
+  )
+{
+  UINTN  Index;
+
+  for (Index = 0; Index < mFullSmramRangeCount; Index++) {
+    if ((mFullSmramRanges[Index].PhysicalStart <= (UINTN)LoadedImage->ImageBase)&&
+        (mFullSmramRanges[Index].PhysicalStart + mFullSmramRanges[Index].PhysicalSize >= (UINTN)LoadedImage->ImageBase + LoadedImage->ImageSize)) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+/**
+  This function installs all SMM image record information.
+**/
+VOID
+SmmInstallImageRecord (
+  VOID
+  )
+{
+  EFI_STATUS                  Status;
+  UINTN                       NoHandles;
+  EFI_HANDLE                  *HandleBuffer;
+  EFI_LOADED_IMAGE_PROTOCOL   *LoadedImage;
+  UINTN                       Index;
+  EFI_SMM_DRIVER_ENTRY        DriverEntry;
+
+  Status = SmmLocateHandleBuffer (
+             ByProtocol,
+             &gEfiLoadedImageProtocolGuid,
+             NULL,
+             &NoHandles,
+             &HandleBuffer
+             );
+  if (EFI_ERROR (Status)) {
+    return ;
+  }
+
+  for (Index = 0; Index < NoHandles; Index++) {
+    Status = gSmst->SmmHandleProtocol (
+                      HandleBuffer[Index],
+                      &gEfiLoadedImageProtocolGuid,
+                      (VOID **)&LoadedImage
+                      );
+    if (EFI_ERROR (Status)) {
+      continue;
+    }
+    DEBUG ((DEBUG_VERBOSE, "LoadedImage - 0x%x 0x%x ", LoadedImage->ImageBase, LoadedImage->ImageSize));
+    {
+      VOID *PdbPointer;
+      PdbPointer = PeCoffLoaderGetPdbPointer (LoadedImage->ImageBase);
+      if (PdbPointer != NULL) {
+        DEBUG ((DEBUG_VERBOSE, "(%a) ", PdbPointer));
+      }
+    }
+    DEBUG ((DEBUG_VERBOSE, "\n"));
+    ZeroMem (&DriverEntry, sizeof(DriverEntry));
+    DriverEntry.ImageBuffer  = (UINTN)LoadedImage->ImageBase;
+    DriverEntry.NumberOfPage = EFI_SIZE_TO_PAGES((UINTN)LoadedImage->ImageSize);
+    SmmInsertImageRecord (&DriverEntry);
+  }
+
+  FreePool (HandleBuffer);
+}
+
+/**
+  Install MemoryAttributesTable.
+
+  @param[in] Protocol   Points to the protocol's unique identifier.
+  @param[in] Interface  Points to the interface instance.
+  @param[in] Handle     The handle on which the interface was installed.
+
+  @retval EFI_SUCCESS   Notification runs successfully.
+**/
+EFI_STATUS
+EFIAPI
+SmmInstallMemoryAttributesTable (
+  IN CONST EFI_GUID  *Protocol,
+  IN VOID            *Interface,
+  IN EFI_HANDLE      Handle
+  )
+{
+  SmmInstallImageRecord ();
+
+  DEBUG ((DEBUG_INFO, "SMM MemoryProtectionAttribute - 0x%016lx\n", mMemoryProtectionAttribute));
+  if ((mMemoryProtectionAttribute & EFI_MEMORY_ATTRIBUTES_RUNTIME_MEMORY_PROTECTION_NON_EXECUTABLE_PE_DATA) == 0) {
+    return EFI_SUCCESS;
+  }
+
+  DEBUG ((DEBUG_VERBOSE, "SMM Total Image Count - 0x%x\n", mImagePropertiesPrivateData.ImageRecordCount));
+  DEBUG ((DEBUG_VERBOSE, "SMM Dump ImageRecord:\n"));
+  DumpImageRecord ();
+
+  PublishMemoryAttributesTable ();
+
+  return EFI_SUCCESS;
+}
+
+/**
+  Initialize MemoryAttributesTable support.
+**/
+VOID
+EFIAPI
+SmmCoreInitializeMemoryAttributesTable (
+  VOID
+  )
+{
+  EFI_STATUS                        Status;
+  VOID                              *Registration;
+
+  Status = gSmst->SmmRegisterProtocolNotify (
+                    &gEfiSmmEndOfDxeProtocolGuid,
+                    SmmInstallMemoryAttributesTable,
+                    &Registration
+                    );
+  ASSERT_EFI_ERROR (Status);
+
   return ;
 }

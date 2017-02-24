@@ -1,7 +1,7 @@
 /** @file
   SMM Core Main Entry Point
 
-  Copyright (c) 2009 - 2016, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2009 - 2017, Intel Corporation. All rights reserved.<BR>
   This program and the accompanying materials are licensed and made available 
   under the terms and conditions of the BSD License which accompanies this 
   distribution.  The full text of the license may be found at        
@@ -86,6 +86,8 @@ SMM_CORE_SMI_HANDLERS  mSmmCoreSmiHandlers[] = {
 
 UINTN                           mFullSmramRangeCount;
 EFI_SMRAM_DESCRIPTOR            *mFullSmramRanges;
+
+EFI_SMM_DRIVER_ENTRY            *mSmmCoreDriverEntry;
 
 EFI_LOADED_IMAGE_PROTOCOL       *mSmmCoreLoadedImage;
 
@@ -430,6 +432,8 @@ SmmEntryPoint (
   EFI_SMM_COMMUNICATE_HEADER  *CommunicateHeader;
   BOOLEAN                     InLegacyBoot;
   BOOLEAN                     IsOverlapped;
+  VOID                        *CommunicationBuffer;
+  UINTN                       BufferSize;
 
   PERF_START (NULL, "SMM", NULL, 0) ;
 
@@ -461,17 +465,19 @@ SmmEntryPoint (
     // Check to see if this is a Synchronous SMI sent through the SMM Communication 
     // Protocol or an Asynchronous SMI
     //
-    if (gSmmCorePrivate->CommunicationBuffer != NULL) {
+    CommunicationBuffer = gSmmCorePrivate->CommunicationBuffer;
+    BufferSize          = gSmmCorePrivate->BufferSize;
+    if (CommunicationBuffer != NULL) {
       //
       // Synchronous SMI for SMM Core or request from Communicate protocol
       //
       IsOverlapped = InternalIsBufferOverlapped (
-                       (UINT8 *) gSmmCorePrivate->CommunicationBuffer,
-                       gSmmCorePrivate->BufferSize,
+                       (UINT8 *) CommunicationBuffer,
+                       BufferSize,
                        (UINT8 *) gSmmCorePrivate,
                        sizeof (*gSmmCorePrivate)
                        );
-      if (!SmmIsBufferOutsideSmmValid ((UINTN)gSmmCorePrivate->CommunicationBuffer, gSmmCorePrivate->BufferSize) || IsOverlapped) {
+      if (!SmmIsBufferOutsideSmmValid ((UINTN)CommunicationBuffer, BufferSize) || IsOverlapped) {
         //
         // If CommunicationBuffer is not in valid address scope,
         // or there is overlap between gSmmCorePrivate and CommunicationBuffer,
@@ -480,19 +486,19 @@ SmmEntryPoint (
         gSmmCorePrivate->CommunicationBuffer = NULL;
         gSmmCorePrivate->ReturnStatus = EFI_INVALID_PARAMETER;
       } else {
-        CommunicateHeader = (EFI_SMM_COMMUNICATE_HEADER *)gSmmCorePrivate->CommunicationBuffer;
-        gSmmCorePrivate->BufferSize -= OFFSET_OF (EFI_SMM_COMMUNICATE_HEADER, Data);
+        CommunicateHeader = (EFI_SMM_COMMUNICATE_HEADER *)CommunicationBuffer;
+        BufferSize -= OFFSET_OF (EFI_SMM_COMMUNICATE_HEADER, Data);
         Status = SmiManage (
                    &CommunicateHeader->HeaderGuid, 
                    NULL, 
                    CommunicateHeader->Data, 
-                   &gSmmCorePrivate->BufferSize
+                   &BufferSize
                    );
         //
         // Update CommunicationBuffer, BufferSize and ReturnStatus
         // Communicate service finished, reset the pointer to CommBuffer to NULL
         //
-        gSmmCorePrivate->BufferSize += OFFSET_OF (EFI_SMM_COMMUNICATE_HEADER, Data);
+        gSmmCorePrivate->BufferSize = BufferSize + OFFSET_OF (EFI_SMM_COMMUNICATE_HEADER, Data);
         gSmmCorePrivate->CommunicationBuffer = NULL;
         gSmmCorePrivate->ReturnStatus = (Status == EFI_SUCCESS) ? EFI_SUCCESS : EFI_NOT_FOUND;
       }
@@ -563,6 +569,42 @@ SmmCoreInstallLoadedImage (
                   NULL
                   );
   ASSERT_EFI_ERROR (Status);
+
+  //
+  // Allocate a Loaded Image Protocol in SMM
+  //
+  Status = SmmAllocatePool (EfiRuntimeServicesData, sizeof(EFI_SMM_DRIVER_ENTRY), (VOID **)&mSmmCoreDriverEntry);
+  ASSERT_EFI_ERROR(Status);
+
+  ZeroMem (mSmmCoreDriverEntry, sizeof(EFI_SMM_DRIVER_ENTRY));
+  //
+  // Fill in the remaining fields of the Loaded Image Protocol instance.
+  //
+  mSmmCoreDriverEntry->Signature = EFI_SMM_DRIVER_ENTRY_SIGNATURE;
+  mSmmCoreDriverEntry->SmmLoadedImage.Revision = EFI_LOADED_IMAGE_PROTOCOL_REVISION;
+  mSmmCoreDriverEntry->SmmLoadedImage.ParentHandle = gSmmCorePrivate->SmmIplImageHandle;
+  mSmmCoreDriverEntry->SmmLoadedImage.SystemTable = gST;
+
+  mSmmCoreDriverEntry->SmmLoadedImage.ImageBase = (VOID *)(UINTN)gSmmCorePrivate->PiSmmCoreImageBase;
+  mSmmCoreDriverEntry->SmmLoadedImage.ImageSize = gSmmCorePrivate->PiSmmCoreImageSize;
+  mSmmCoreDriverEntry->SmmLoadedImage.ImageCodeType = EfiRuntimeServicesCode;
+  mSmmCoreDriverEntry->SmmLoadedImage.ImageDataType = EfiRuntimeServicesData;
+
+  mSmmCoreDriverEntry->ImageEntryPoint = gSmmCorePrivate->PiSmmCoreEntryPoint;
+  mSmmCoreDriverEntry->ImageBuffer     = gSmmCorePrivate->PiSmmCoreImageBase;
+  mSmmCoreDriverEntry->NumberOfPage    = EFI_SIZE_TO_PAGES((UINTN)gSmmCorePrivate->PiSmmCoreImageSize);
+
+  //
+  // Create a new image handle in the SMM handle database for the SMM Driver
+  //
+  mSmmCoreDriverEntry->SmmImageHandle = NULL;
+  Status = SmmInstallProtocolInterface (
+             &mSmmCoreDriverEntry->SmmImageHandle,
+             &gEfiLoadedImageProtocolGuid,
+             EFI_NATIVE_INTERFACE,
+             &mSmmCoreDriverEntry->SmmLoadedImage
+             );
+  ASSERT_EFI_ERROR(Status);
 
   return ;
 }
@@ -635,6 +677,10 @@ SmmMain (
   SmramProfileInstallProtocol ();
 
   SmmCoreInstallLoadedImage ();
+
+  SmmCoreInitializeMemoryAttributesTable ();
+
+  SmmCoreInitializeSmiHandlerProfile ();
 
   return EFI_SUCCESS;
 }

@@ -3,7 +3,7 @@
 #
 #  It provides an implementation of DXE Core that is compliant with DXE CIS.
 #  
-#  Copyright (c) 2006 - 2016, Intel Corporation. All rights reserved.<BR>
+#  Copyright (c) 2006 - 2017, Intel Corporation. All rights reserved.<BR>
 #  This program and the accompanying materials
 #  are licensed and made available under the terms and conditions of the BSD License
 #  which accompanies this distribution.  The full text of the license may be found at
@@ -42,6 +42,7 @@
   Misc/InstallConfigurationTable.c
   Misc/PropertiesTable.c
   Misc/MemoryAttributesTable.c
+  Misc/MemoryProtection.c
   Library/Library.c
   Hand/DriverSupport.c
   Hand/Notify.c
@@ -161,6 +162,7 @@
   gEfiHiiPackageListProtocolGuid                ## SOMETIMES_PRODUCES
   gEfiEbcProtocolGuid                           ## SOMETIMES_CONSUMES
   gEfiSmmBase2ProtocolGuid                      ## SOMETIMES_CONSUMES
+  gEfiBlockIoProtocolGuid                       ## SOMETIMES_CONSUMES
 
   # Arch Protocols
   gEfiBdsArchProtocolGuid                       ## CONSUMES
@@ -191,9 +193,10 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdMemoryProfilePropertyMask               ## CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdMemoryProfileDriverPath                 ## CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdPropertiesTableEnable                   ## CONSUMES
-  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardDirection                 ## CONSUMES
-  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPageGuardTypeMask                  ## CONSUMES
-  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardTypeMask                  ## CONSUMES
+  gEfiMdeModulePkgTokenSpaceGuid.PcdImageProtectionPolicy                   ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardDirection          ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPageGuardTypeMask           ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardTypeMask           ## CONSUMES
 
 # [Hob]
 # RESOURCE_DESCRIPTOR   ## CONSUMES

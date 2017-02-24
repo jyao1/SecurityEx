@@ -14,12 +14,36 @@
 
 #include "PiSmmCore.h"
 
-LIST_ENTRY  mSmmPoolLists[MAX_POOL_INDEX];
+LIST_ENTRY  mSmmPoolLists[SmmPoolTypeMax][MAX_POOL_INDEX];
 //
 // To cache the SMRAM base since when Loading modules At fixed address feature is enabled, 
 // all module is assigned an offset relative the SMRAM base in build time.
 //
 GLOBAL_REMOVE_IF_UNREFERENCED  EFI_PHYSICAL_ADDRESS       gLoadModuleAtFixAddressSmramBase = 0;
+
+/**
+  Convert a UEFI memory type to SMM pool type.
+
+  @param[in]  MemoryType              Type of pool to allocate.
+
+  @return SMM pool type
+**/
+SMM_POOL_TYPE
+UefiMemoryTypeToSmmPoolType (
+  IN  EFI_MEMORY_TYPE   MemoryType
+  )
+{
+  ASSERT ((MemoryType == EfiRuntimeServicesCode) || (MemoryType == EfiRuntimeServicesData));
+  switch (MemoryType) {
+  case EfiRuntimeServicesCode:
+    return SmmPoolTypeCode;
+  case EfiRuntimeServicesData:
+    return SmmPoolTypeData;
+  default:
+    return SmmPoolTypeMax;
+  }
+}
+
 
 /**
   Called to initialize the memory service.
@@ -35,59 +59,50 @@ SmmInitializeMemoryServices (
   )
 {
   UINTN                  Index;
- 	UINT64                 SmmCodeSize;
- 	UINTN                  CurrentSmramRangesIndex;
- 	UINT64                 MaxSize;
+  EFI_STATUS             Status;
+  UINTN                  SmmPoolTypeIndex;
+  EFI_LOAD_FIXED_ADDRESS_CONFIGURATION_TABLE *LMFAConfigurationTable;
 
   //
   // Initialize Pool list
   //
-  for (Index = sizeof (mSmmPoolLists) / sizeof (*mSmmPoolLists); Index > 0;) {
-    InitializeListHead (&mSmmPoolLists[--Index]);
-  }
-  CurrentSmramRangesIndex = 0;
-  //
-  // If Loading Module At fixed Address feature is enabled, cache the SMRAM base here
-  //
-  if (PcdGet64(PcdLoadModuleAtFixAddressEnable) != 0) {
-    //
-    // Build tool will calculate the smm code size and then patch the PcdLoadFixAddressSmmCodePageNumber
-    //
-    SmmCodeSize = LShiftU64 (PcdGet32(PcdLoadFixAddressSmmCodePageNumber), EFI_PAGE_SHIFT);
-    
-    //
-    // Find the largest SMRAM range between 1MB and 4GB that is at least 256KB - 4K in size
-    //
-    for (Index = 0, MaxSize = SIZE_256KB - EFI_PAGE_SIZE; Index < SmramRangeCount; Index++) {
-      //
-      // Skip any SMRAM region that is already allocated, needs testing, or needs ECC initialization
-      //
-      if ((SmramRanges[Index].RegionState & (EFI_ALLOCATED | EFI_NEEDS_TESTING | EFI_NEEDS_ECC_INITIALIZATION)) != 0) {
-        continue;
-      }
-
-      if (SmramRanges[Index].CpuStart >= BASE_1MB) {
-        if ((SmramRanges[Index].CpuStart + SmramRanges[Index].PhysicalSize - 1) <= MAX_ADDRESS) {
-          if (SmramRanges[Index].PhysicalSize >= MaxSize) {
-            MaxSize = SmramRanges[Index].PhysicalSize;
-            CurrentSmramRangesIndex = Index;
-          }
-        }
-      }
+  for (SmmPoolTypeIndex = 0; SmmPoolTypeIndex < SmmPoolTypeMax; SmmPoolTypeIndex++) {
+    for (Index = 0; Index < ARRAY_SIZE (mSmmPoolLists[SmmPoolTypeIndex]); Index++) {
+      InitializeListHead (&mSmmPoolLists[SmmPoolTypeIndex][Index]);
     }
-    gLoadModuleAtFixAddressSmramBase = SmramRanges[CurrentSmramRangesIndex].CpuStart;
-    
-    //
-    // cut out a memory range from this SMRAM range with the size SmmCodeSize to hold SMM driver code
-    // A notable thing is that SMM core is already loaded into this range.
-    //
-    SmramRanges[CurrentSmramRangesIndex].CpuStart     = SmramRanges[CurrentSmramRangesIndex].CpuStart + SmmCodeSize; 
-    SmramRanges[CurrentSmramRangesIndex].PhysicalSize = SmramRanges[CurrentSmramRangesIndex].PhysicalSize - SmmCodeSize;
   }
+
+  Status = EfiGetSystemConfigurationTable (
+            &gLoadFixedAddressConfigurationTableGuid,
+           (VOID **) &LMFAConfigurationTable
+           );
+  if (!EFI_ERROR (Status) && LMFAConfigurationTable != NULL) {
+    gLoadModuleAtFixAddressSmramBase = LMFAConfigurationTable->SmramBase;
+  }
+
   //
-  // Initialize free SMRAM regions
+  // Add Free SMRAM regions
+  // Need add Free memory at first, to let gSmmMemoryMap record data
   //
   for (Index = 0; Index < SmramRangeCount; Index++) {
+    if ((SmramRanges[Index].RegionState & (EFI_ALLOCATED | EFI_NEEDS_TESTING | EFI_NEEDS_ECC_INITIALIZATION)) != 0) {
+      continue;
+    }
+    SmmAddMemoryRegion (
+      SmramRanges[Index].CpuStart,
+      SmramRanges[Index].PhysicalSize,
+      EfiConventionalMemory,
+      SmramRanges[Index].RegionState
+      );
+  }
+
+  //
+  // Add the allocated SMRAM regions
+  //
+  for (Index = 0; Index < SmramRangeCount; Index++) {
+    if ((SmramRanges[Index].RegionState & (EFI_ALLOCATED | EFI_NEEDS_TESTING | EFI_NEEDS_ECC_INITIALIZATION)) == 0) {
+      continue;
+    }
     SmmAddMemoryRegion (
       SmramRanges[Index].CpuStart,
       SmramRanges[Index].PhysicalSize,
@@ -101,6 +116,7 @@ SmmInitializeMemoryServices (
 /**
   Internal Function. Allocate a pool by specified PoolIndex.
 
+  @param  PoolType              Type of pool to allocate.
   @param  PoolIndex             Index which indicate the Pool size.
   @param  FreePoolHdr           The returned Free pool.
 
@@ -110,6 +126,7 @@ SmmInitializeMemoryServices (
 **/
 EFI_STATUS
 InternalAllocPoolByIndex (
+  IN  EFI_MEMORY_TYPE   PoolType,
   IN  UINTN             PoolIndex,
   OUT FREE_POOL_HEADER  **FreePoolHdr
   )
@@ -118,28 +135,32 @@ InternalAllocPoolByIndex (
   FREE_POOL_HEADER      *Hdr;
   POOL_TAIL             *PoolTail;
   EFI_PHYSICAL_ADDRESS  Address;
+  SMM_POOL_TYPE         SmmPoolType;
+
+  SmmPoolType = UefiMemoryTypeToSmmPoolType(PoolType);
 
   ASSERT (PoolIndex <= MAX_POOL_INDEX);
   Status = EFI_SUCCESS;
   Hdr = NULL;
   if (PoolIndex == MAX_POOL_INDEX) {
-    Status = SmmInternalAllocatePages (AllocateAnyPages, EfiRuntimeServicesData, EFI_SIZE_TO_PAGES (MAX_POOL_SIZE << 1), &Address);
+    Status = SmmInternalAllocatePages (AllocateAnyPages, PoolType, EFI_SIZE_TO_PAGES (MAX_POOL_SIZE << 1), &Address);
     if (EFI_ERROR (Status)) {
       return EFI_OUT_OF_RESOURCES;
     }
     Hdr = (FREE_POOL_HEADER *) (UINTN) Address;
-  } else if (!IsListEmpty (&mSmmPoolLists[PoolIndex])) {
-    Hdr = BASE_CR (GetFirstNode (&mSmmPoolLists[PoolIndex]), FREE_POOL_HEADER, Link);
+  } else if (!IsListEmpty (&mSmmPoolLists[SmmPoolType][PoolIndex])) {
+    Hdr = BASE_CR (GetFirstNode (&mSmmPoolLists[SmmPoolType][PoolIndex]), FREE_POOL_HEADER, Link);
     RemoveEntryList (&Hdr->Link);
   } else {
-    Status = InternalAllocPoolByIndex (PoolIndex + 1, &Hdr);
+    Status = InternalAllocPoolByIndex (PoolType, PoolIndex + 1, &Hdr);
     if (!EFI_ERROR (Status)) {
       Hdr->Header.Signature = 0;
       Hdr->Header.Size >>= 1;
       Hdr->Header.Available = TRUE;
+      Hdr->Header.Type = PoolType;
       PoolTail = HEAD_TO_TAIL(&Hdr->Header);
       PoolTail->Signature = 0;
-      InsertHeadList (&mSmmPoolLists[PoolIndex], &Hdr->Link);
+      InsertHeadList (&mSmmPoolLists[SmmPoolType][PoolIndex], &Hdr->Link);
       Hdr = (FREE_POOL_HEADER*)((UINT8*)Hdr + Hdr->Header.Size);
     }
   }
@@ -148,6 +169,7 @@ InternalAllocPoolByIndex (
     Hdr->Header.Signature = POOL_HEAD_SIGNATURE;
     Hdr->Header.Size = MIN_POOL_SIZE << PoolIndex;
     Hdr->Header.Available = FALSE;
+    Hdr->Header.Type = PoolType;
     PoolTail = HEAD_TO_TAIL(&Hdr->Header);
     PoolTail->Signature = POOL_TAIL_SIGNATURE;
     PoolTail->Size = Hdr->Header.Size;
@@ -170,12 +192,15 @@ InternalFreePoolByIndex (
   IN FREE_POOL_HEADER  *FreePoolHdr
   )
 {
-  UINTN  PoolIndex;
-  POOL_TAIL  *PoolTail;
+  UINTN                 PoolIndex;
+  SMM_POOL_TYPE         SmmPoolType;
+  POOL_TAIL             *PoolTail;
 
   ASSERT ((FreePoolHdr->Header.Size & (FreePoolHdr->Header.Size - 1)) == 0);
   ASSERT (((UINTN)FreePoolHdr & (FreePoolHdr->Header.Size - 1)) == 0);
   ASSERT (FreePoolHdr->Header.Size >= MIN_POOL_SIZE);
+
+  SmmPoolType = UefiMemoryTypeToSmmPoolType(FreePoolHdr->Header.Type);
 
   PoolIndex = (UINTN) (HighBitSet32 ((UINT32)FreePoolHdr->Header.Size) - MIN_POOL_SHIFT);
   FreePoolHdr->Header.Signature = 0;
@@ -183,7 +208,7 @@ InternalFreePoolByIndex (
   PoolTail = HEAD_TO_TAIL(&FreePoolHdr->Header);
   PoolTail->Signature = 0;
   ASSERT (PoolIndex < MAX_POOL_INDEX);
-  InsertHeadList (&mSmmPoolLists[PoolIndex], &FreePoolHdr->Link);
+  InsertHeadList (&mSmmPoolLists[SmmPoolType][PoolIndex], &FreePoolHdr->Link);
   return EFI_SUCCESS;
 }
 
@@ -232,6 +257,7 @@ SmmInternalAllocatePool (
     PoolHdr->Signature = POOL_HEAD_SIGNATURE;
     PoolHdr->Size = EFI_PAGES_TO_SIZE (Size);
     PoolHdr->Available = FALSE;
+    PoolHdr->Type = PoolType;
     PoolTail = HEAD_TO_TAIL(PoolHdr);
     PoolTail->Signature = POOL_TAIL_SIGNATURE;
     PoolTail->Size = PoolHdr->Size;
@@ -245,7 +271,7 @@ SmmInternalAllocatePool (
     PoolIndex++;
   }
 
-  Status = InternalAllocPoolByIndex (PoolIndex, &FreePoolHdr);
+  Status = InternalAllocPoolByIndex (PoolType, PoolIndex, &FreePoolHdr);
   if (!EFI_ERROR(Status)) {
     *Buffer = &FreePoolHdr->Header + 1;
   }
