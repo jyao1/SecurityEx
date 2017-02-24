@@ -108,6 +108,20 @@ EFI_MEMORY_TYPE_INFORMATION gMemoryTypeInformation[EfiMaxMemoryType + 1] = {
 GLOBAL_REMOVE_IF_UNREFERENCED   BOOLEAN       gLoadFixedAddressCodeMemoryReady = FALSE;
 
 BOOLEAN
+IsInSmm (
+  VOID
+  )
+{
+  BOOLEAN     InSmm;
+
+  InSmm = FALSE;
+  if (gSmmBase2 != NULL) {
+    gSmmBase2->InSmm (gSmmBase2, &InSmm);
+  }
+  return InSmm;
+}
+
+BOOLEAN
 IsMemoryTypeForHeapPageGuard (
   IN EFI_MEMORY_TYPE        MemoryType
   )
@@ -1975,7 +1989,7 @@ CoreAllocatePages (
   EFI_PHYSICAL_ADDRESS  BasePage;
 
   NeedGuard = FALSE;
-  if (FeaturePcdGet(PcdHeapPageGuard)) {
+  if (FeaturePcdGet(PcdHeapPageGuard) && !IsInSmm()) {
     CheckGuardPages();
     if (IsAllocateTypeForHeapGuard(Type) && IsMemoryTypeForHeapPageGuard(MemoryType)) {
       NeedGuard = TRUE;
@@ -2077,7 +2091,7 @@ CoreInternalFreePages (
 
   }
 
-  if (FeaturePcdGet(PcdHeapPageGuard)) {
+  if (FeaturePcdGet(PcdHeapPageGuard) && !IsInSmm()) {
     if (IsMemoryTypeForHeapPageGuard(Entry->Type)) {
       IsGuarded = TRUE;
     }
@@ -2102,10 +2116,8 @@ CoreInternalFreePages (
   }
 
 Done:
-  if (FeaturePcdGet(PcdHeapPageGuard)) {
-    if (!EFI_ERROR (Status) && IsGuarded) {
-      ClearGuardPageOnFreePages (Memory, NumberOfPages, GuardOperation);
-    }
+  if (FeaturePcdGet(PcdHeapPageGuard) && !EFI_ERROR (Status) && IsGuarded) {
+    ClearGuardPageOnFreePages (Memory, NumberOfPages, GuardOperation);
   }
   CoreReleaseMemoryLock ();
   return Status;
@@ -2135,7 +2147,7 @@ CoreFreePages (
   UINTN                 Index;
   EFI_PHYSICAL_ADDRESS  BasePage;
 
-  if (FeaturePcdGet(PcdHeapPageGuard)) {
+  if (FeaturePcdGet(PcdHeapPageGuard) && !IsInSmm()) {
     CheckGuardPages();
   }
 
@@ -2150,7 +2162,7 @@ CoreFreePages (
       NULL
       );
     InstallMemoryAttributesTableOnMemoryAllocation (MemoryType);
-    if (FeaturePcdGet(PcdHeapPageGuard)) {
+    if (FeaturePcdGet(PcdHeapPageGuard) && !IsInSmm()) {
       // we must defer heap guard here to avoid allocation re-entry issue.
       if (IsMemoryTypeForHeapPageGuard(MemoryType)) {
         for (Index = 0; Index < 4; Index++) {
@@ -2627,10 +2639,8 @@ CoreFreePoolPages (
 
   Status = CoreConvertPages (Memory, NumberOfPages, EfiConventionalMemory);
 
-  if (FeaturePcdGet(PcdHeapPageGuard)) {
-    if (!EFI_ERROR (Status) && IsGuarded) {
-      ClearGuardPageOnFreePoolPages (Memory, NumberOfPages);
-    }
+  if (FeaturePcdGet(PcdHeapPageGuard) && !EFI_ERROR (Status) && IsGuarded) {
+    ClearGuardPageOnFreePoolPages (Memory, NumberOfPages);
   }
 }
 

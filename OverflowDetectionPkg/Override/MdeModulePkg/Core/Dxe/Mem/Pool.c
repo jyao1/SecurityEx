@@ -16,32 +16,15 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include "Imem.h"
 #include <Library/PageTableLib.h>
 
-BOOLEAN
-IsMemoryTypeForHeapPoolGuard (
-  IN EFI_MEMORY_TYPE        MemoryType
-  )
-{
-  UINT64 TestBit;
-
-  if ((UINT32) MemoryType >= MEMORY_TYPE_OS_RESERVED_MIN) {
-    TestBit = BIT63;
-  } else if ((UINT32) MemoryType >= MEMORY_TYPE_OEM_RESERVED_MIN) {
-    TestBit = BIT62;
-  } else {
-    TestBit = LShiftU64 (1, MemoryType);
-  }
-
-  if ((PcdGet64 (PcdHeapPoolGuardTypeMask) & TestBit) != 0) {
-    return TRUE;
-  } else {
-    return FALSE;
-  }
-}
-
 VOID *
 EFIAPI
 AllocatePagesForGuard(
   IN UINTN  Pages
+  );
+
+BOOLEAN
+IsInSmm (
+  VOID
   );
 
 #define POOL_FREE_SIGNATURE   SIGNATURE_32('p','f','r','0')
@@ -113,6 +96,28 @@ POOL            mPoolHead[EfiMaxMemoryType];
 // List of pool header to search for the appropriate memory type.
 //
 LIST_ENTRY      mPoolHeadList = INITIALIZE_LIST_HEAD_VARIABLE (mPoolHeadList);
+
+BOOLEAN
+IsMemoryTypeForHeapPoolGuard (
+  IN EFI_MEMORY_TYPE        MemoryType
+  )
+{
+  UINT64 TestBit;
+
+  if ((UINT32) MemoryType >= MEMORY_TYPE_OS_RESERVED_MIN) {
+    TestBit = BIT63;
+  } else if ((UINT32) MemoryType >= MEMORY_TYPE_OEM_RESERVED_MIN) {
+    TestBit = BIT62;
+  } else {
+    TestBit = LShiftU64 (1, MemoryType);
+  }
+
+  if ((PcdGet64 (PcdHeapPoolGuardTypeMask) & TestBit) != 0) {
+    return TRUE;
+  } else {
+    return FALSE;
+  }
+}
 
 /**
   Get pool size table index from the specified size.
@@ -309,7 +314,7 @@ CoreAllocatePool (
   UINTN                 AllocatedPages;
 
   NeedGuard = FALSE;
-  if (FeaturePcdGet(PcdHeapPageGuard)) {
+  if (FeaturePcdGet(PcdHeapPageGuard) && !IsInSmm()) {
     if (IsMemoryTypeForHeapPoolGuard(PoolType)) {
       NeedGuard = TRUE;
     }
@@ -688,7 +693,7 @@ CoreFreePoolI (
     Granularity = DEFAULT_PAGE_ALLOCATION;
   }
 
-  if (FeaturePcdGet(PcdHeapPageGuard)) {
+  if (FeaturePcdGet(PcdHeapPageGuard) && !IsInSmm()) {
     if (IsMemoryTypeForHeapPoolGuard(Head->Type)) {
       IsGuarded = TRUE;
     }
