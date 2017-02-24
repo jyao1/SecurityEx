@@ -280,7 +280,7 @@ HandOffToDxeCore (
     Status = PeiServicesAllocatePages (
                EfiBootServicesData,
                EFI_SIZE_TO_PAGES(sizeof (X64_IDT_TABLE) + SizeOfTemplate * IDT_ENTRY_COUNT),
-               (EFI_PHYSICAL_ADDRESS *) &IdtTableForX64
+               &VectorAddress
                );
     ASSERT_EFI_ERROR (Status);
 
@@ -288,6 +288,7 @@ HandOffToDxeCore (
     // Store EFI_PEI_SERVICES** in the 4 bytes immediately preceding IDT to avoid that
     // it may not be gotten correctly after IDT register is re-written.
     //
+    IdtTableForX64 = (X64_IDT_TABLE *) (UINTN) VectorAddress;
     IdtTableForX64->PeiService = GetPeiServicesTablePointer ();
 
     VectorAddress = (EFI_PHYSICAL_ADDRESS) (UINTN) (IdtTableForX64 + 1);
@@ -316,6 +317,14 @@ HandOffToDxeCore (
     SaveAndSetDebugTimerInterrupt (FALSE);
 
     AsmWriteIdtr (&gLidtDescriptor);
+
+    DEBUG ((
+      DEBUG_INFO,
+      "%a() Stack Base: 0x%lx, Stack Size: 0x%x\n",
+      __FUNCTION__,
+      BaseOfStack,
+      STACK_SIZE
+      ));
 
     //
     // Go to Long Mode and transfer control to DxeCore.
@@ -386,6 +395,14 @@ HandOffToDxeCore (
     // Update the contents of BSP stack HOB to reflect the real stack info passed to DxeCore.
     //
     UpdateStackHob (BaseOfStack, STACK_SIZE);
+
+    DEBUG ((
+      DEBUG_INFO,
+      "%a() Stack Base: 0x%lx, Stack Size: 0x%x\n",
+      __FUNCTION__,
+      BaseOfStack,
+      STACK_SIZE
+      ));
 
     //
     // Transfer the control to the entry point of DxeCore.

@@ -1,7 +1,7 @@
 /** @file
   Core image handling services to load and unload PeImage.
 
-Copyright (c) 2006 - 2016, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2006 - 2017, Intel Corporation. All rights reserved.<BR>
 This program and the accompanying materials
 are licensed and made available under the terms and conditions of the BSD License
 which accompanies this distribution.  The full text of the license may be found at
@@ -202,6 +202,8 @@ CoreInitializeImageServices (
                &mLoadPe32PrivateData.Pe32Image
                );
   }
+
+  ProtectUefiImage (&Image->Info, Image->LoadedImageDevicePath);
 
   return Status;
 }
@@ -513,7 +515,7 @@ CoreLoadPeImage (
   }
 
   //
-  // Allocate memory of the correct memory type aligned on the required image boundry
+  // Allocate memory of the correct memory type aligned on the required image boundary
   //
   DstBufAlocated = FALSE;
   if (DstBuffer == 0) {
@@ -867,6 +869,8 @@ CoreUnloadAndCloseImage (
   if (Image->Started) {
     UnregisterMemoryProfileImage (Image);
   }
+
+  UnprotectUefiImage (&Image->Info, Image->LoadedImageDevicePath);
 
   if (Image->Ebc != NULL) {
     //
@@ -1348,6 +1352,7 @@ CoreLoadImageCommon (
       goto Done;
     }
   }
+  ProtectUefiImage (&Image->Info, Image->LoadedImageDevicePath);
 
   //
   // Success.  Return the image handle
@@ -1914,7 +1919,7 @@ Done:
                                   unloaded.
 
   @retval EFI_SUCCESS             The image has been unloaded.
-  @retval EFI_UNSUPPORTED         The image has been sarted, and does not support
+  @retval EFI_UNSUPPORTED         The image has been started, and does not support
                                   unload.
   @retval EFI_INVALID_PARAMPETER  ImageHandle is not a valid image handle.
 
