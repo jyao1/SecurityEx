@@ -86,7 +86,8 @@ VOID
 CoreFreePoolPages (
   IN EFI_PHYSICAL_ADDRESS   Memory,
   IN UINTN                  NumberOfPages,
-  IN EFI_MEMORY_TYPE        PoolType
+  IN EFI_MEMORY_TYPE        PoolType,
+  IN BOOLEAN                IsGuarded
   );
 
 

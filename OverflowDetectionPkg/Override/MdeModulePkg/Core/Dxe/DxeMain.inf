@@ -191,6 +191,9 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdMemoryProfilePropertyMask               ## CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdMemoryProfileDriverPath                 ## CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdPropertiesTableEnable                   ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardDirection                 ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPageGuardTypeMask                  ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardTypeMask                  ## CONSUMES
 
 # [Hob]
 # RESOURCE_DESCRIPTOR   ## CONSUMES

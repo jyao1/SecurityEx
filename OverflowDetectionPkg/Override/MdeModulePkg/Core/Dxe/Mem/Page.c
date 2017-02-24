@@ -107,36 +107,26 @@ EFI_MEMORY_TYPE_INFORMATION gMemoryTypeInformation[EfiMaxMemoryType + 1] = {
 //
 GLOBAL_REMOVE_IF_UNREFERENCED   BOOLEAN       gLoadFixedAddressCodeMemoryReady = FALSE;
 
-EFI_MEMORY_TYPE        mMemoryTypeForHeapGuard[] = {
-  // EfiReservedMemoryType,
-  EfiLoaderCode,
-  EfiLoaderData,
-  EfiBootServicesCode,
-  EfiBootServicesData,
-  // EfiRuntimeServicesCode,
-  // EfiRuntimeServicesData,
-  // EfiConventionalMemory,
-  // EfiUnusableMemory,
-  // EfiACPIReclaimMemory,
-  // EfiACPIMemoryNVS,
-  // EfiMemoryMappedIO,
-  // EfiMemoryMappedIOPortSpace,
-  //  EfiPalCode,
-};
-
 BOOLEAN
-IsMemoryTypeForHeapGuard (
+IsMemoryTypeForHeapPageGuard (
   IN EFI_MEMORY_TYPE        MemoryType
   )
 {
-  UINTN  Index;
+  UINT64 TestBit;
 
-  for (Index = 0; Index < sizeof(mMemoryTypeForHeapGuard) / sizeof(mMemoryTypeForHeapGuard[0]); Index++) {
-    if (MemoryType == mMemoryTypeForHeapGuard[Index]) {
-      return TRUE;
-    }
+  if ((UINT32) MemoryType >= MEMORY_TYPE_OS_RESERVED_MIN) {
+    TestBit = BIT63;
+  } else if ((UINT32) MemoryType >= MEMORY_TYPE_OEM_RESERVED_MIN) {
+    TestBit = BIT62;
+  } else {
+    TestBit = LShiftU64 (1, MemoryType);
   }
-  return FALSE;
+
+  if ((PcdGet64 (PcdHeapPageGuardTypeMask) & TestBit) != 0) {
+    return TRUE;
+  } else {
+    return FALSE;
+  }
 }
 
 BOOLEAN
@@ -1987,7 +1977,7 @@ CoreAllocatePages (
   NeedGuard = FALSE;
   if (FeaturePcdGet(PcdHeapPageGuard)) {
     CheckGuardPages();
-    if (IsAllocateTypeForHeapGuard(Type) && IsMemoryTypeForHeapGuard(MemoryType)) {
+    if (IsAllocateTypeForHeapGuard(Type) && IsMemoryTypeForHeapPageGuard(MemoryType)) {
       NeedGuard = TRUE;
     }
   }
@@ -2088,7 +2078,7 @@ CoreInternalFreePages (
   }
 
   if (FeaturePcdGet(PcdHeapPageGuard)) {
-    if (IsMemoryTypeForHeapGuard(Entry->Type)) {
+    if (IsMemoryTypeForHeapPageGuard(Entry->Type)) {
       IsGuarded = TRUE;
     }
   }
@@ -2162,7 +2152,7 @@ CoreFreePages (
     InstallMemoryAttributesTableOnMemoryAllocation (MemoryType);
     if (FeaturePcdGet(PcdHeapPageGuard)) {
       // we must defer heap guard here to avoid allocation re-entry issue.
-      if (IsMemoryTypeForHeapGuard(MemoryType)) {
+      if (IsMemoryTypeForHeapPageGuard(MemoryType)) {
         for (Index = 0; Index < 4; Index++) {
           switch(Index) {
           case 0:
@@ -2629,18 +2619,11 @@ VOID
 CoreFreePoolPages (
   IN EFI_PHYSICAL_ADDRESS   Memory,
   IN UINTN                  NumberOfPages,
-  IN EFI_MEMORY_TYPE        PoolType
+  IN EFI_MEMORY_TYPE        PoolType,
+  IN BOOLEAN                IsGuarded
   )
 {
-  BOOLEAN         IsGuarded;
   EFI_STATUS      Status;
-
-  IsGuarded = FALSE;
-  if (FeaturePcdGet(PcdHeapPageGuard)) {
-    if (IsMemoryTypeForHeapGuard(PoolType)) {
-      IsGuarded = TRUE;
-    }
-  }
 
   Status = CoreConvertPages (Memory, NumberOfPages, EfiConventionalMemory);
 

@@ -17,9 +17,26 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/PageTableLib.h>
 
 BOOLEAN
-IsMemoryTypeForHeapGuard(
+IsMemoryTypeForHeapPoolGuard (
   IN EFI_MEMORY_TYPE        MemoryType
-  );
+  )
+{
+  UINT64 TestBit;
+
+  if ((UINT32) MemoryType >= MEMORY_TYPE_OS_RESERVED_MIN) {
+    TestBit = BIT63;
+  } else if ((UINT32) MemoryType >= MEMORY_TYPE_OEM_RESERVED_MIN) {
+    TestBit = BIT62;
+  } else {
+    TestBit = LShiftU64 (1, MemoryType);
+  }
+
+  if ((PcdGet64 (PcdHeapPoolGuardTypeMask) & TestBit) != 0) {
+    return TRUE;
+  } else {
+    return FALSE;
+  }
+}
 
 VOID *
 EFIAPI
@@ -293,7 +310,7 @@ CoreAllocatePool (
 
   NeedGuard = FALSE;
   if (FeaturePcdGet(PcdHeapPageGuard)) {
-    if (IsMemoryTypeForHeapGuard(PoolType)) {
+    if (IsMemoryTypeForHeapPoolGuard(PoolType)) {
       NeedGuard = TRUE;
     }
   }
@@ -312,7 +329,7 @@ CoreAllocatePool (
     if (FeaturePcdGet(PcdHeapPageGuard) && NeedGuard && (AllocatedPages != 0)) {
       // we must defer heap guard here to avoid allocation re-entry issue.
       BasePage = (UINTN)*Buffer - OFFSET_OF(POOL_HEAD, Data);
-      ASSERT((BasePage & (SIZE_4KB - 1)) == 0);
+      BasePage = BasePage & ~(EFI_PAGE_SIZE - 1);
       BasePage = BasePage - EFI_PAGES_TO_SIZE(1);
       SetMemoryPageAttributes (
         NULL,
@@ -322,6 +339,7 @@ CoreAllocatePool (
         AllocatePagesForGuard
         );
       BasePage = (UINTN)*Buffer - OFFSET_OF(POOL_HEAD, Data);
+      BasePage = BasePage & ~(EFI_PAGE_SIZE - 1);
       BasePage = BasePage + EFI_PAGES_TO_SIZE(AllocatedPages);
       SetMemoryPageAttributes (
         NULL,
@@ -404,13 +422,17 @@ CoreAllocatePoolI (
   // If allocation is over max size, just allocate pages for the request
   // (slow)
   //
-  if (Index >= SIZE_TO_LIST (Granularity)) {
+  if ((Index >= SIZE_TO_LIST (Granularity)) || NeedGuard) {
     NoPages = EFI_SIZE_TO_PAGES(Size) + EFI_SIZE_TO_PAGES (Granularity) - 1;
     NoPages &= ~(UINTN)(EFI_SIZE_TO_PAGES (Granularity) - 1);
     if (AllocatedPages != NULL) {
       *AllocatedPages = NoPages;
     }
     Head = CoreAllocatePoolPages (PoolType, NoPages, Granularity, NeedGuard);
+    if (NeedGuard && PcdGetBool(PcdHeapPoolGuardDirection)) {
+      // The returned pool is adjacent to the bottom guard page
+      Head = (VOID *)((UINTN)Head + (EFI_PAGES_TO_SIZE(NoPages) - Size));
+    }
     goto Done;
   }
 
@@ -612,6 +634,9 @@ CoreFreePoolI (
   BOOLEAN     AllFree;
   UINTN       Granularity;
   EFI_MEMORY_TYPE   MemType;
+  BOOLEAN         IsGuarded;
+
+  IsGuarded = FALSE;
 
   ASSERT(Buffer != NULL);
   //
@@ -663,6 +688,12 @@ CoreFreePoolI (
     Granularity = DEFAULT_PAGE_ALLOCATION;
   }
 
+  if (FeaturePcdGet(PcdHeapPageGuard)) {
+    if (IsMemoryTypeForHeapPoolGuard(Head->Type)) {
+      IsGuarded = TRUE;
+    }
+  }
+
   if (PoolType != NULL) {
     *PoolType = Head->Type;
   }
@@ -677,14 +708,18 @@ CoreFreePoolI (
   //
   // If it's not on the list, it must be pool pages
   //
-  if (Index >= SIZE_TO_LIST (Granularity)) {
+  if (Index >= SIZE_TO_LIST (Granularity) || IsGuarded) {
 
     //
     // Return the memory pages back to free memory
     //
     NoPages = EFI_SIZE_TO_PAGES(Size) + EFI_SIZE_TO_PAGES (Granularity) - 1;
     NoPages &= ~(UINTN)(EFI_SIZE_TO_PAGES (Granularity) - 1);
-    CoreFreePoolPages ((EFI_PHYSICAL_ADDRESS) (UINTN) Head, NoPages, MemType);
+    if (IsGuarded && PcdGetBool(PcdHeapPoolGuardDirection)) {
+      // The returned pool is adjacent to the bottom guard page
+      Head = (VOID *)((UINTN)Head - (EFI_PAGES_TO_SIZE(NoPages) - Size));
+    }
+    CoreFreePoolPages ((EFI_PHYSICAL_ADDRESS) (UINTN) Head, NoPages, MemType, IsGuarded);
 
   } else {
 
@@ -740,7 +775,7 @@ CoreFreePoolI (
         //
         // Free the page
         //
-        CoreFreePoolPages ((EFI_PHYSICAL_ADDRESS) (UINTN)NewPage, EFI_SIZE_TO_PAGES (Granularity), MemType);
+        CoreFreePoolPages ((EFI_PHYSICAL_ADDRESS) (UINTN)NewPage, EFI_SIZE_TO_PAGES (Granularity), MemType, IsGuarded);
       }
     }
   }

@@ -41,9 +41,64 @@
 
   ## Indicates if UEFI Heap Page Guard will be enabled.
   #  If enabled, a Guard Page is setup for PageAllocation to avoid heap overflow.<BR><BR>
-  #  NOTE: This feature is NOT for Pool Guard. Pool overflow may be detected by FreePool().
-  #        Or pool overflow may trigger page guard if the overflow cross page.
   #   TRUE  - UEFI Heap Page Guard will be enabled.<BR>
   #   FALSE - UEFI Heap Page Guard will be disabled.<BR>
-  # @Prompt Enable UEFI Stack Guard.
+  # @Prompt Enable UEFI Heap Page Guard.
   gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPageGuard|TRUE|BOOLEAN|0x00010003
+
+[PcdsFixedAtBuild, PcdsPatchableInModule]
+  ## Indicates the direction of Guard Page for Pool Guard.
+  #   TRUE  - The returned pool is adjacent to the bottom guard page.<BR>
+  #   FALSE - The returned pool is adjacent to the top guard page.<BR>
+  # @Prompt The direction of Guard Page for Pool Guard.
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardDirection|TRUE|BOOLEAN|0x00010005
+  
+  ## Indicates which type pool allocation need guard page.
+  # Below is bit mask for this PCD: (Order is same as UEFI spec)<BR>
+  #  EfiReservedMemoryType          0x0001<BR>
+  #  EfiLoaderCode                  0x0002<BR>
+  #  EfiLoaderData                  0x0004<BR>
+  #  EfiBootServicesCode            0x0008<BR>
+  #  EfiBootServicesData            0x0010<BR>
+  #  EfiRuntimeServicesCode         0x0020<BR>
+  #  EfiRuntimeServicesData         0x0040<BR>
+  #  EfiConventionalMemory          0x0080<BR>
+  #  EfiUnusableMemory              0x0100<BR>
+  #  EfiACPIReclaimMemory           0x0200<BR>
+  #  EfiACPIMemoryNVS               0x0400<BR>
+  #  EfiMemoryMappedIO              0x0800<BR>
+  #  EfiMemoryMappedIOPortSpace     0x1000<BR>
+  #  EfiPalCode                     0x2000<BR>
+  #  EfiPersistentMemory            0x4000<BR>
+  #  OEM Reserved       0x4000000000000000<BR>
+  #  OS Reserved        0x8000000000000000<BR>
+  #
+  # e.g. LoaderCode+LoaderData+BootServicesCode+BootServicesData are needed, 0x1E should be used.<BR>
+  #
+  # @Prompt The memory type mask for Page Guard.
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPageGuardTypeMask|0x1E|UINT64|0x00010006
+
+  ## Indicates which type pool allocation need guard page.
+  # Below is bit mask for this PCD: (Order is same as UEFI spec)<BR>
+  #  EfiReservedMemoryType          0x0001<BR>
+  #  EfiLoaderCode                  0x0002<BR>
+  #  EfiLoaderData                  0x0004<BR>
+  #  EfiBootServicesCode            0x0008<BR>
+  #  EfiBootServicesData            0x0010<BR>
+  #  EfiRuntimeServicesCode         0x0020<BR>
+  #  EfiRuntimeServicesData         0x0040<BR>
+  #  EfiConventionalMemory          0x0080<BR>
+  #  EfiUnusableMemory              0x0100<BR>
+  #  EfiACPIReclaimMemory           0x0200<BR>
+  #  EfiACPIMemoryNVS               0x0400<BR>
+  #  EfiMemoryMappedIO              0x0800<BR>
+  #  EfiMemoryMappedIOPortSpace     0x1000<BR>
+  #  EfiPalCode                     0x2000<BR>
+  #  EfiPersistentMemory            0x4000<BR>
+  #  OEM Reserved       0x4000000000000000<BR>
+  #  OS Reserved        0x8000000000000000<BR>
+  #
+  # e.g. LoaderCode+LoaderData+BootServicesCode+BootServicesData are needed, 0x1E should be used.<BR>
+  #
+  # @Prompt The memory type mask for Pool Guard.
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardTypeMask|0x0|UINT64|0x00010007
