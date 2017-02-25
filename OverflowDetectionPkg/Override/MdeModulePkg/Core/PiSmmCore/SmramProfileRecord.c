@@ -438,7 +438,9 @@ BuildDriverInfo (
   Status = SmmInternalAllocatePool (
              EfiRuntimeServicesData,
              sizeof (*DriverInfoData) + sizeof (LIST_ENTRY) + PdbSize,
-             (VOID **) &DriverInfoData
+             (VOID **) &DriverInfoData,
+             FALSE,
+             NULL
              );
   if (EFI_ERROR (Status)) {
     return NULL;
@@ -1160,7 +1162,9 @@ SmmCoreUpdateProfileAllocate (
   Status = SmmInternalAllocatePool (
              EfiRuntimeServicesData,
              sizeof (*AllocInfoData) + ActionStringSize,
-             (VOID **) &AllocInfoData
+             (VOID **) &AllocInfoData,
+             FALSE,
+             NULL
              );
   if (EFI_ERROR (Status)) {
     return EFI_OUT_OF_RESOURCES;

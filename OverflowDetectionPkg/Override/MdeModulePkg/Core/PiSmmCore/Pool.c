@@ -13,6 +13,7 @@
 **/
 
 #include "PiSmmCore.h"
+#include <Library/PageTableLib.h>
 
 LIST_ENTRY  mSmmPoolLists[SmmPoolTypeMax][MAX_POOL_INDEX];
 //
@@ -20,6 +21,32 @@ LIST_ENTRY  mSmmPoolLists[SmmPoolTypeMax][MAX_POOL_INDEX];
 // all module is assigned an offset relative the SMRAM base in build time.
 //
 GLOBAL_REMOVE_IF_UNREFERENCED  EFI_PHYSICAL_ADDRESS       gLoadModuleAtFixAddressSmramBase = 0;
+
+VOID *
+EFIAPI
+AllocatePagesForGuard (
+  IN UINTN  Pages
+  );
+
+BOOLEAN
+IsMemoryTypeForHeapPoolGuard (
+  IN EFI_MEMORY_TYPE        MemoryType
+  )
+{
+  UINT64 TestBit;
+  
+  if ((MemoryType != EfiRuntimeServicesData) && (MemoryType != EfiRuntimeServicesCode)) {
+    return FALSE;
+  }
+
+  TestBit = LShiftU64 (1, MemoryType);
+
+  if ((PcdGet64 (PcdHeapPoolGuardTypeMask) & TestBit) != 0) {
+    return TRUE;
+  } else {
+    return FALSE;
+  }
+}
 
 /**
   Convert a UEFI memory type to SMM pool type.
@@ -128,7 +155,9 @@ EFI_STATUS
 InternalAllocPoolByIndex (
   IN  EFI_MEMORY_TYPE   PoolType,
   IN  UINTN             PoolIndex,
-  OUT FREE_POOL_HEADER  **FreePoolHdr
+  OUT FREE_POOL_HEADER  **FreePoolHdr,
+  IN BOOLEAN            NeedGuard,
+  OUT UINTN             *AllocatedPages OPTIONAL
   )
 {
   EFI_STATUS            Status;
@@ -143,7 +172,10 @@ InternalAllocPoolByIndex (
   Status = EFI_SUCCESS;
   Hdr = NULL;
   if (PoolIndex == MAX_POOL_INDEX) {
-    Status = SmmInternalAllocatePages (AllocateAnyPages, PoolType, EFI_SIZE_TO_PAGES (MAX_POOL_SIZE << 1), &Address);
+    if (AllocatedPages != NULL) {
+      *AllocatedPages = EFI_SIZE_TO_PAGES(MAX_POOL_SIZE << 1);
+    }
+    Status = SmmInternalAllocatePages (AllocateAnyPages, PoolType, EFI_SIZE_TO_PAGES (MAX_POOL_SIZE << 1), &Address, TRUE, NeedGuard);
     if (EFI_ERROR (Status)) {
       return EFI_OUT_OF_RESOURCES;
     }
@@ -152,7 +184,7 @@ InternalAllocPoolByIndex (
     Hdr = BASE_CR (GetFirstNode (&mSmmPoolLists[SmmPoolType][PoolIndex]), FREE_POOL_HEADER, Link);
     RemoveEntryList (&Hdr->Link);
   } else {
-    Status = InternalAllocPoolByIndex (PoolType, PoolIndex + 1, &Hdr);
+    Status = InternalAllocPoolByIndex (PoolType, PoolIndex + 1, &Hdr, NeedGuard, AllocatedPages);
     if (!EFI_ERROR (Status)) {
       Hdr->Header.Signature = 0;
       Hdr->Header.Size >>= 1;
@@ -230,7 +262,9 @@ EFIAPI
 SmmInternalAllocatePool (
   IN   EFI_MEMORY_TYPE  PoolType,
   IN   UINTN            Size,
-  OUT  VOID             **Buffer
+  OUT  VOID             **Buffer,
+  IN BOOLEAN            NeedGuard,
+  OUT UINTN             *AllocatedPages OPTIONAL
   )
 {
   POOL_HEADER           *PoolHdr;
@@ -239,23 +273,36 @@ SmmInternalAllocatePool (
   EFI_STATUS            Status;
   EFI_PHYSICAL_ADDRESS  Address;
   UINTN                 PoolIndex;
+  UINTN                 NoPages;
 
   if (PoolType != EfiRuntimeServicesCode &&
       PoolType != EfiRuntimeServicesData) {
     return EFI_INVALID_PARAMETER;
   }
 
+  if (AllocatedPages != NULL) {
+    *AllocatedPages = 0;
+  }
+
   Size += POOL_OVERHEAD;
-  if (Size > MAX_POOL_SIZE) {
-    Size = EFI_SIZE_TO_PAGES (Size);
-    Status = SmmInternalAllocatePages (AllocateAnyPages, PoolType, Size, &Address);
+  if (Size > MAX_POOL_SIZE || NeedGuard) {
+    NoPages = EFI_SIZE_TO_PAGES (Size);
+    if (AllocatedPages != NULL) {
+      *AllocatedPages = NoPages;
+    }
+    Status = SmmInternalAllocatePages (AllocateAnyPages, PoolType, NoPages, &Address, TRUE, NeedGuard);
     if (EFI_ERROR (Status)) {
       return Status;
     }
 
     PoolHdr = (POOL_HEADER*)(UINTN)Address;
+    if (NeedGuard && PcdGetBool(PcdHeapPoolGuardDirection)) {
+      // The returned pool is adjacent to the bottom guard page
+      PoolHdr = (VOID *)((UINTN)PoolHdr + (EFI_PAGES_TO_SIZE(NoPages) - Size));
+    }
+
     PoolHdr->Signature = POOL_HEAD_SIGNATURE;
-    PoolHdr->Size = EFI_PAGES_TO_SIZE (Size);
+    PoolHdr->Size = Size;
     PoolHdr->Available = FALSE;
     PoolHdr->Type = PoolType;
     PoolTail = HEAD_TO_TAIL(PoolHdr);
@@ -271,7 +318,7 @@ SmmInternalAllocatePool (
     PoolIndex++;
   }
 
-  Status = InternalAllocPoolByIndex (PoolType, PoolIndex, &FreePoolHdr);
+  Status = InternalAllocPoolByIndex (PoolType, PoolIndex, &FreePoolHdr, NeedGuard, AllocatedPages);
   if (!EFI_ERROR(Status)) {
     *Buffer = &FreePoolHdr->Header + 1;
   }
@@ -300,8 +347,18 @@ SmmAllocatePool (
   )
 {
   EFI_STATUS  Status;
+  BOOLEAN               NeedGuard;
+  EFI_PHYSICAL_ADDRESS  BasePage;
+  UINTN                 AllocatedPages;
 
-  Status = SmmInternalAllocatePool (PoolType, Size, Buffer);
+  NeedGuard = FALSE;
+  if (FeaturePcdGet(PcdHeapPageGuard)) {
+    if (IsMemoryTypeForHeapPoolGuard(PoolType)) {
+      NeedGuard = TRUE;
+    }
+  }
+
+  Status = SmmInternalAllocatePool (PoolType, Size, Buffer, NeedGuard, &AllocatedPages);
   if (!EFI_ERROR (Status)) {
     SmmCoreUpdateProfile (
       (EFI_PHYSICAL_ADDRESS) (UINTN) RETURN_ADDRESS (0),
@@ -311,6 +368,29 @@ SmmAllocatePool (
       *Buffer,
       NULL
       );
+    if (FeaturePcdGet(PcdHeapPageGuard) && NeedGuard && (AllocatedPages != 0)) {
+      // we must defer heap guard here to avoid allocation re-entry issue.
+      BasePage = (UINTN)*Buffer - sizeof(POOL_HEADER);
+      BasePage = BasePage & ~(EFI_PAGE_SIZE - 1);
+      BasePage = BasePage - EFI_PAGES_TO_SIZE(1);
+      SetMemoryPageAttributes (
+        NULL,
+        BasePage,
+        EFI_PAGES_TO_SIZE(1),
+        EFI_MEMORY_RP,
+        AllocatePagesForGuard
+        );
+      BasePage = (UINTN)*Buffer - sizeof(POOL_HEADER);
+      BasePage = BasePage & ~(EFI_PAGE_SIZE - 1);
+      BasePage = BasePage + EFI_PAGES_TO_SIZE(AllocatedPages);
+      SetMemoryPageAttributes (
+        NULL,
+        BasePage,
+        EFI_PAGES_TO_SIZE(1),
+        EFI_MEMORY_RP,
+        AllocatePagesForGuard
+        );
+    }
   }
   return Status;
 }
@@ -332,6 +412,10 @@ SmmInternalFreePool (
 {
   FREE_POOL_HEADER  *FreePoolHdr;
   POOL_TAIL         *PoolTail;
+  BOOLEAN         IsGuarded;
+  UINTN             NoPages;
+
+  IsGuarded = FALSE;
 
   if (Buffer == NULL) {
     return EFI_INVALID_PARAMETER;
@@ -356,12 +440,26 @@ SmmInternalFreePool (
     return EFI_INVALID_PARAMETER;
   }
 
-  if (FreePoolHdr->Header.Size > MAX_POOL_SIZE) {
+  if (FeaturePcdGet(PcdHeapPageGuard)) {
+    if (IsMemoryTypeForHeapPoolGuard(FreePoolHdr->Header.Type)) {
+      IsGuarded = TRUE;
+    }
+  }
+
+  if (FreePoolHdr->Header.Size > MAX_POOL_SIZE || IsGuarded) {
+    NoPages = EFI_SIZE_TO_PAGES(FreePoolHdr->Header.Size);
+    if (IsGuarded && PcdGetBool(PcdHeapPoolGuardDirection)) {
+      // The returned pool is adjacent to the bottom guard page
+      FreePoolHdr = (VOID *)((UINTN)FreePoolHdr - (EFI_PAGES_TO_SIZE(NoPages) - FreePoolHdr->Header.Size));
+    }
     ASSERT (((UINTN)FreePoolHdr & EFI_PAGE_MASK) == 0);
-    ASSERT ((FreePoolHdr->Header.Size & EFI_PAGE_MASK) == 0);
+    //ASSERT ((FreePoolHdr->Header.Size & EFI_PAGE_MASK) == 0);
     return SmmInternalFreePages (
              (EFI_PHYSICAL_ADDRESS)(UINTN)FreePoolHdr,
-             EFI_SIZE_TO_PAGES (FreePoolHdr->Header.Size)
+             NoPages,
+             TRUE,
+             NULL,
+             NULL
              );
   }
   return InternalFreePoolByIndex (FreePoolHdr);

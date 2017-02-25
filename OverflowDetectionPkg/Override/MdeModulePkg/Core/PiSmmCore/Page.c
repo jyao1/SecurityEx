@@ -14,6 +14,8 @@
 
 #include "PiSmmCore.h"
 #include <Library/SmmServicesTableLib.h>
+#include <Library/PageTableLib.h>
+
 
 #define TRUNCATE_TO_PAGES(a)  ((a) >> EFI_PAGE_SHIFT)
 
@@ -55,6 +57,636 @@ UINTN         mFreeMapStack = 0;
 LIST_ENTRY   mFreeMemoryMapEntryList = INITIALIZE_LIST_HEAD_VARIABLE (mFreeMemoryMapEntryList);
 
 /**
+  Update SMM memory map entry.
+
+  @param[in]  Type                   The type of allocation to perform.
+  @param[in]  Memory                 The base of memory address.
+  @param[in]  NumberOfPages          The number of pages to allocate.
+  @param[in]  AddRegion              If this memory is new added region.
+**/
+VOID
+ConvertSmmMemoryMapEntry (
+  IN EFI_MEMORY_TYPE       Type,
+  IN EFI_PHYSICAL_ADDRESS  Memory,
+  IN UINTN                 NumberOfPages,
+  IN BOOLEAN               AddRegion
+  );
+
+/**
+  Internal function.  Moves any memory descriptors that are on the
+  temporary descriptor stack to heap.
+
+**/
+VOID
+CoreFreeMemoryMapStack (
+  VOID
+  );
+
+BOOLEAN
+IsMemoryTypeForHeapPageGuard (
+  IN EFI_MEMORY_TYPE        MemoryType
+  )
+{
+  UINT64 TestBit;
+  
+  if ((MemoryType != EfiRuntimeServicesData) && (MemoryType != EfiRuntimeServicesCode)) {
+    return FALSE;
+  }
+
+  TestBit = LShiftU64 (1, MemoryType);
+
+  if ((PcdGet64 (PcdHeapPageGuardTypeMask) & TestBit) != 0) {
+    return TRUE;
+  } else {
+    return FALSE;
+  }
+}
+
+BOOLEAN
+IsAllocateTypeForHeapGuard (
+  IN EFI_ALLOCATE_TYPE      Type
+  )
+{
+  if ((Type == AllocateMaxAddress || Type == AllocateAnyPages)) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+typedef enum {
+  GuardPageTypeUnallocated,
+  GuardPageTypeAllocatedUnguarded,
+  GuardPageTypeGuarded,
+} GUARD_PAGE_TYPE;
+
+#define GUARD_PAGE_HEAD_SIGNATURE   SIGNATURE_32('g','h','d','0')
+
+typedef struct {
+  UINT32            Signature;
+  UINT32            Reserved;
+  PHYSICAL_ADDRESS  Address;
+  LIST_ENTRY        Link;
+} GUARD_PAGE_HEAD;
+
+#define GUARD_PAGE_TAIL_SIGNATURE   SIGNATURE_32('g','t','a','l')
+
+typedef GUARD_PAGE_HEAD GUARD_PAGE_TAIL;
+
+#define GUARD_HEAD_TO_TAIL(a)   \
+  ((GUARD_PAGE_TAIL *) (((CHAR8 *) (a)) + EFI_PAGES_TO_SIZE(1) - sizeof(GUARD_PAGE_TAIL)));
+
+#define GUARD_TAIL_TO_HEAD(a)   \
+  ((GUARD_PAGE_HEAD *) (((CHAR8 *) (a)) + sizeof(GUARD_PAGE_TAIL) - EFI_PAGES_TO_SIZE(1)));
+
+GLOBAL_REMOVE_IF_UNREFERENCED LIST_ENTRY  mGuardPageList = INITIALIZE_LIST_HEAD_VARIABLE (mGuardPageList);
+
+BOOLEAN
+IsTheGuardPageGuarded(
+  IN EFI_PHYSICAL_ADDRESS   Address
+  )
+{
+  EFI_STATUS  Status;
+  UINT64      Attributes;
+
+  ASSERT((Address & (SIZE_4KB - 1)) == 0);
+  if (Address == ((UINTN)&mGuardPageList & ~(SIZE_4KB - 1))) {
+    // Skip the list head node.
+    return FALSE;
+  }
+
+  Status = GetMemoryPageAttributes(
+             NULL,
+             Address,
+             &Attributes,
+             NULL
+             );
+  ASSERT_EFI_ERROR(Status);
+  if ((Attributes & EFI_MEMORY_RP) == 0) {
+    return FALSE;
+  } else {
+    return TRUE;
+  }
+}
+
+VOID
+UnguardTheGuardPage (
+  IN EFI_PHYSICAL_ADDRESS   Address
+  )
+{
+  ASSERT((Address & (SIZE_4KB - 1)) == 0);
+  if (Address == ((UINTN)&mGuardPageList & ~(SIZE_4KB - 1))) {
+    // Skip the list head node.
+    return;
+  }
+
+  ClearMemoryPageAttributes (
+    NULL,
+    Address,
+    EFI_PAGES_TO_SIZE(1),
+    EFI_MEMORY_RP,
+    NULL
+    );
+}
+
+VOID
+GuardTheGuardPage (
+  IN EFI_PHYSICAL_ADDRESS   Address
+  )
+{
+  ASSERT((Address & (SIZE_4KB - 1)) == 0);
+  if (Address == ((UINTN)&mGuardPageList & ~(SIZE_4KB - 1))) {
+    // Skip the list head node.
+    return;
+  }
+
+  SetMemoryPageAttributes (
+    NULL,
+    Address,
+    EFI_PAGES_TO_SIZE(1),
+    EFI_MEMORY_RP,
+    NULL
+    );
+}
+
+VOID
+DumpGuardPages (
+  VOID
+  )
+{
+  LIST_ENTRY      *Link;
+  GUARD_PAGE_HEAD *GuardPageHead;
+  GUARD_PAGE_TAIL *GuardPageTail;
+
+  DEBUG((EFI_D_INFO, "DumpGuardPages - head: 0x%08x (0x%08x, 0x%08x)\n", &mGuardPageList, mGuardPageList.BackLink, mGuardPageList.ForwardLink));
+
+  for (Link = mGuardPageList.ForwardLink; Link != &mGuardPageList; Link = Link->ForwardLink) {
+    GuardPageHead = BASE_CR(Link, GUARD_PAGE_HEAD, Link);
+
+    if (IsTheGuardPageGuarded((UINTN)GuardPageHead & ~(SIZE_4KB - 1))) {
+      // Do not go through link list, the are not present.
+      return;
+    }
+
+    ASSERT ((GuardPageHead->Signature == GUARD_PAGE_HEAD_SIGNATURE) || (GuardPageHead->Signature == GUARD_PAGE_TAIL_SIGNATURE));
+    if (GuardPageHead->Signature == GUARD_PAGE_HEAD_SIGNATURE) {
+      GuardPageTail = GUARD_HEAD_TO_TAIL(GuardPageHead);
+      ASSERT(GuardPageHead->Address == (UINTN)GuardPageHead);
+      ASSERT(GuardPageHead->Address == GuardPageTail->Address);
+      DEBUG((EFI_D_INFO, "GUARD_HEAD: 0x%08x, 0x%08x (0x%08x, 0x%08x)\n", GuardPageHead, &GuardPageHead->Link, GuardPageHead->Link.BackLink, GuardPageHead->Link.ForwardLink));
+    }
+    if (GuardPageHead->Signature == GUARD_PAGE_TAIL_SIGNATURE) {
+      GuardPageTail = GuardPageHead;
+      GuardPageHead = GUARD_TAIL_TO_HEAD(GuardPageTail);
+      ASSERT(GuardPageHead->Address == (UINTN)GuardPageHead);
+      ASSERT(GuardPageHead->Address == GuardPageTail->Address);
+      DEBUG((EFI_D_INFO, "GUARD_TAIL: 0x%08x, 0x%08x (0x%08x, 0x%08x)\n", GuardPageTail, &GuardPageTail->Link, GuardPageTail->Link.BackLink, GuardPageTail->Link.ForwardLink));
+    }
+  }
+  DEBUG((EFI_D_INFO, "DumpGuardPages Done\n"));
+}
+
+VOID
+CheckGuardPages(
+  VOID
+  )
+{
+  LIST_ENTRY      *Link;
+  GUARD_PAGE_HEAD *GuardPageHead;
+  GUARD_PAGE_TAIL *GuardPageTail;
+
+  for (Link = mGuardPageList.ForwardLink; Link != &mGuardPageList; Link = Link->ForwardLink) {
+    GuardPageHead = BASE_CR(Link, GUARD_PAGE_HEAD, Link);
+      
+    if (IsTheGuardPageGuarded((UINTN)GuardPageHead & ~(SIZE_4KB - 1))) {
+      // No need to check, they are already page protected.
+      return;
+    }
+
+    ASSERT((GuardPageHead->Signature == GUARD_PAGE_HEAD_SIGNATURE) || (GuardPageHead->Signature == GUARD_PAGE_TAIL_SIGNATURE));
+    if (GuardPageHead->Signature == GUARD_PAGE_HEAD_SIGNATURE) {
+      GuardPageTail = GUARD_HEAD_TO_TAIL(GuardPageHead);
+      ASSERT(GuardPageHead->Address == (UINTN)GuardPageHead);
+      ASSERT(GuardPageHead->Address == GuardPageTail->Address);
+    }
+    if (GuardPageHead->Signature == GUARD_PAGE_TAIL_SIGNATURE) {
+      GuardPageTail = GuardPageHead;
+      GuardPageHead = GUARD_TAIL_TO_HEAD(GuardPageTail);
+      ASSERT(GuardPageHead->Address == (UINTN)GuardPageHead);
+      ASSERT(GuardPageHead->Address == GuardPageTail->Address);
+    }
+  }
+}
+
+GUARD_PAGE_TYPE
+GetGuardPageType (
+  IN EFI_PHYSICAL_ADDRESS   Address
+  )
+{
+  LIST_ENTRY      *Link;
+  MEMORY_MAP      *Entry;
+  GUARD_PAGE_HEAD *GuardPageHead;
+
+  //
+  // Find the entry that the covers the range
+  //
+  Entry = NULL;
+  for (Link = gMemoryMap.ForwardLink; Link != &gMemoryMap; Link = Link->ForwardLink) {
+    Entry = CR(Link, MEMORY_MAP, Link, MEMORY_MAP_SIGNATURE);
+    if (Entry->Start <= Address && Entry->End > Address) {
+        break;
+    }
+  }
+  if (Link == &gMemoryMap) {
+    return GuardPageTypeUnallocated;
+  }
+
+  ASSERT (Entry != NULL);
+
+  if (Entry->Type == EfiConventionalMemory) {
+    return GuardPageTypeUnallocated;
+  }
+
+  //
+  // Now we know it is allocated
+  //
+
+  for (Link = mGuardPageList.ForwardLink; Link != &mGuardPageList; Link = Link->ForwardLink) {
+    GuardPageHead = BASE_CR(Link, GUARD_PAGE_HEAD, Link);
+
+    if (IsTheGuardPageGuarded((UINTN)GuardPageHead & ~(SIZE_4KB - 1))) {
+      // Do not go through link list, check presence directly.
+      if (IsTheGuardPageGuarded(Address)) {
+        return GuardPageTypeGuarded;
+      } else {
+        return GuardPageTypeAllocatedUnguarded;
+      }
+    }
+
+    ASSERT((GuardPageHead->Signature == GUARD_PAGE_HEAD_SIGNATURE) || (GuardPageHead->Signature == GUARD_PAGE_TAIL_SIGNATURE));
+    if (GuardPageHead->Address == Address) {
+      return GuardPageTypeGuarded;
+    }
+  }
+  return GuardPageTypeAllocatedUnguarded;
+}
+
+VOID
+AllocateGuardPage(
+  IN EFI_PHYSICAL_ADDRESS   Address
+  )
+{
+//  DEBUG ((EFI_D_INFO, "AllocateGuardPage - 0x%x\n", Address));
+  ConvertSmmMemoryMapEntry (Address, 1, EfiRuntimeServicesData, FALSE);
+  CoreFreeMemoryMapStack();
+}
+
+VOID
+FreeGuardPage(
+  IN EFI_PHYSICAL_ADDRESS   Address
+  )
+{
+//  DEBUG ((EFI_D_INFO, "FreeGuardPage - 0x%x\n", Address));
+  ConvertSmmMemoryMapEntry (Address, 1, EfiConventionalMemory, FALSE);
+  CoreFreeMemoryMapStack();
+}
+
+
+/**
+  Adds a node to the beginning of a doubly-linked list, and returns the pointer
+  to the head node of the doubly-linked list.
+
+  Adds the node Entry at the beginning of the doubly-linked list denoted by
+  ListHead, and returns ListHead.
+
+  If ListHead is NULL, then ASSERT().
+  If Entry is NULL, then ASSERT().
+  If ListHead was not initialized with INTIALIZE_LIST_HEAD_VARIABLE() or
+  InitializeListHead(), then ASSERT().
+  If PcdMaximumLinkedListLength is not zero, and prior to insertion the number
+  of nodes in ListHead, including the ListHead node, is greater than or
+  equal to PcdMaximumLinkedListLength, then ASSERT().
+
+  @param  ListHead  A pointer to the head node of a doubly-linked list.
+  @param  Entry     A pointer to a node that is to be inserted at the beginning
+                    of a doubly-linked list.
+
+  @return ListHead
+
+**/
+LIST_ENTRY *
+EFIAPI
+InsertHeadListGuarded (
+  IN OUT  LIST_ENTRY                *ListHead,
+  IN OUT  LIST_ENTRY                *Entry
+  )
+{
+  BOOLEAN   IsEntryForwardLinkGuarded;
+
+  IsEntryForwardLinkGuarded = IsTheGuardPageGuarded((UINTN)ListHead->ForwardLink & ~(SIZE_4KB - 1));
+  if (IsEntryForwardLinkGuarded) {
+    UnguardTheGuardPage((UINTN)ListHead->ForwardLink & ~(SIZE_4KB - 1));
+  }
+
+//  DEBUG((EFI_D_INFO, "InsertHeadListGuarded - Entry (0x%x)\n", Entry));
+//  DEBUG((EFI_D_INFO, "InsertHeadListGuarded - ListHead (0x%x)\n", ListHead));
+  Entry->ForwardLink = ListHead->ForwardLink;
+  Entry->BackLink = ListHead;
+//  DEBUG((EFI_D_INFO, "InsertHeadListGuarded - Entry->ForwardLink (0x%x)\n", Entry->ForwardLink));
+  Entry->ForwardLink->BackLink = Entry;
+  ListHead->ForwardLink = Entry;
+
+  if (IsEntryForwardLinkGuarded) {
+    UnguardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
+  }
+  return ListHead;
+}
+
+/**
+  Adds a node to the end of a doubly-linked list, and returns the pointer to
+  the head node of the doubly-linked list.
+
+  Adds the node Entry to the end of the doubly-linked list denoted by ListHead,
+  and returns ListHead.
+
+  If ListHead is NULL, then ASSERT().
+  If Entry is NULL, then ASSERT().
+  If ListHead was not initialized with INTIALIZE_LIST_HEAD_VARIABLE() or 
+  InitializeListHead(), then ASSERT().
+  If PcdMaximumLinkedListLength is not zero, and prior to insertion the number
+  of nodes in ListHead, including the ListHead node, is greater than or
+  equal to PcdMaximumLinkedListLength, then ASSERT().
+
+  @param  ListHead  A pointer to the head node of a doubly-linked list.
+  @param  Entry     A pointer to a node that is to be added at the end of the
+                    doubly-linked list.
+
+  @return ListHead
+
+**/
+LIST_ENTRY *
+EFIAPI
+InsertTailListGuarded (
+  IN OUT  LIST_ENTRY                *ListHead,
+  IN OUT  LIST_ENTRY                *Entry
+  )
+{
+  BOOLEAN   IsEntryBackLinkGuarded;
+
+  IsEntryBackLinkGuarded = IsTheGuardPageGuarded((UINTN)ListHead->BackLink & ~(SIZE_4KB - 1));
+  if (IsEntryBackLinkGuarded) {
+    UnguardTheGuardPage((UINTN)ListHead->BackLink & ~(SIZE_4KB - 1));
+  }
+
+//  DEBUG((EFI_D_INFO, "InsertTailListGuarded - Entry (0x%x)\n", Entry));
+  Entry->ForwardLink = ListHead;
+//  DEBUG((EFI_D_INFO, "InsertTailListGuarded - ListHead (0x%x)\n", ListHead));
+  Entry->BackLink = ListHead->BackLink;
+//  DEBUG((EFI_D_INFO, "InsertTailListGuarded - Entry->BackLink (0x%x)\n", Entry->BackLink));
+  Entry->BackLink->ForwardLink = Entry;
+  ListHead->BackLink = Entry;
+
+  if (IsEntryBackLinkGuarded) {
+    UnguardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
+  }
+  return ListHead;
+}
+
+/**
+  Removes a node from a doubly-linked list, and returns the node that follows
+  the removed node.
+
+  Removes the node Entry from a doubly-linked list. It is up to the caller of
+  this function to release the memory used by this node if that is required. On
+  exit, the node following Entry in the doubly-linked list is returned. If
+  Entry is the only node in the linked list, then the head node of the linked
+  list is returned.
+
+  If Entry is NULL, then ASSERT().
+  If Entry is the head node of an empty list, then ASSERT().
+  If PcdMaximumLinkedListLength is not zero, and the number of nodes in the
+  linked list containing Entry, including the Entry node, is greater than
+  or equal to PcdMaximumLinkedListLength, then ASSERT().
+
+  @param  Entry A pointer to a node in a linked list.
+
+  @return Entry.
+
+**/
+LIST_ENTRY *
+EFIAPI
+RemoveEntryListGuarded (
+  IN      CONST LIST_ENTRY          *Entry
+  )
+{
+  BOOLEAN   IsEntryForwardLinkGuarded;
+  BOOLEAN   IsEntryBackLinkGuarded;
+
+  IsEntryForwardLinkGuarded = IsTheGuardPageGuarded((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
+  if (IsEntryForwardLinkGuarded) {
+    UnguardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
+  }
+  IsEntryBackLinkGuarded = IsTheGuardPageGuarded((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
+  if (IsEntryBackLinkGuarded) {
+    UnguardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
+  }
+
+//  DEBUG((EFI_D_INFO, "RemoveEntryListGuarded - Entry (0x%x)\n", Entry));
+//  DEBUG((EFI_D_INFO, "RemoveEntryListGuarded - Entry->ForwardLink (0x%x)\n", Entry->ForwardLink));
+//  DEBUG((EFI_D_INFO, "RemoveEntryListGuarded - Entry->BackLink (0x%x)\n", Entry->BackLink));
+  Entry->ForwardLink->BackLink = Entry->BackLink;
+  Entry->BackLink->ForwardLink = Entry->ForwardLink;
+
+  if (IsEntryForwardLinkGuarded) {
+    UnguardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
+  }
+  if (IsEntryBackLinkGuarded) {
+    UnguardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
+  }
+  return Entry->ForwardLink;
+}
+
+
+VOID
+SetGuardPage (
+  IN EFI_PHYSICAL_ADDRESS   Address
+  )
+{
+  GUARD_PAGE_HEAD  *GuardPageHead;
+  GUARD_PAGE_TAIL  *GuardPageTail;
+
+//  DEBUG ((EFI_D_INFO, "SetGuardPage - 0x%x\n", Address));
+
+  GuardPageHead = (VOID *)(UINTN)Address;
+  GuardPageHead->Signature = GUARD_PAGE_HEAD_SIGNATURE;
+  GuardPageHead->Address = Address;
+  InsertTailListGuarded (&mGuardPageList, &GuardPageHead->Link);
+
+  GuardPageTail = GUARD_HEAD_TO_TAIL(GuardPageHead);
+  GuardPageTail->Signature = GUARD_PAGE_TAIL_SIGNATURE;
+  GuardPageTail->Address = Address;
+  InsertTailListGuarded (&mGuardPageList, &GuardPageTail->Link);
+}
+
+VOID
+ClearGuardPage (
+  IN EFI_PHYSICAL_ADDRESS   Address
+  )
+{
+  GUARD_PAGE_HEAD  *GuardPageHead;
+  GUARD_PAGE_TAIL  *GuardPageTail;
+
+//  DEBUG ((EFI_D_INFO, "ClearGuardPage - 0x%x\n", Address));
+
+  GuardPageHead = (VOID *)(UINTN)Address;
+  UnguardTheGuardPage(Address);
+
+  ASSERT (GuardPageHead->Signature == GUARD_PAGE_HEAD_SIGNATURE);
+  ASSERT (GuardPageHead->Address == Address);
+  RemoveEntryListGuarded (&GuardPageHead->Link);
+
+  GuardPageTail = GUARD_HEAD_TO_TAIL(GuardPageHead);
+  ASSERT (GuardPageTail->Signature == GUARD_PAGE_TAIL_SIGNATURE);
+  ASSERT (GuardPageTail->Address == Address);
+  RemoveEntryListGuarded (&GuardPageTail->Link);
+}
+
+/**
+  +---------+--------------+---------+
+  |GuardPage|Allocated Page|GuardPage|
+  +---------+--------------+---------+
+**/
+VOID
+SetGuardPageOnAllocatePages (
+  IN EFI_PHYSICAL_ADDRESS   Memory,
+  IN UINTN                  NumberOfPages
+  )
+{
+  DEBUG ((EFI_D_INFO, "SetGuardPageOnAllocatePages - 0x%lx (0x%x)\n", Memory, NumberOfPages));
+
+  SetGuardPage (Memory - EFI_PAGES_TO_SIZE(1));
+  SetGuardPage (Memory + EFI_PAGES_TO_SIZE(NumberOfPages));
+
+//  DumpGuardPages ();
+}
+
+/**
+We need consider below situations.
+                 +-------+-----------+------------+---------+-------+
+                 | GUARD | Mem_Start | Mem_Middle | Mem_End | GUARD |
+                 +-------+-----------+------------+---------+-------+
+
+==> (Free All)
+
+                         +-----------+------------+---------+-------+
+==> (Free Start)         |   GUARD   | Mem_Middle | Mem_End | GUARD |
+                         +-----------+------------+---------+-------+
+                 +-------+-----------+------------+---------+-------+
+==> (Free Middle)| GUARD | Mem_Start |   GUARD    | Mem_End | GUARD |
+                 +-------+-----------+------------+---------+-------+
+                 +-------+-----------+------------+---------+
+==> (Free End)   | GUARD | Mem_Start | Mem_Middle |  GUARD  |
+                 +-------+-----------+------------+---------+
+}
+
+Operation is an array to carry 4 entries.
+  0: Operation for Memory - EFI_PAGES_TO_SIZE(1)                   // GuardOperationNoAction or GuardOperationClearGuard
+  1: Operation for Memory                                          // GuardOperationNoAction or GuardOperationSetGuard
+  2: Operation for Memory + EFI_PAGES_TO_SIZE(NumberOfPages - 1)   // GuardOperationNoAction or GuardOperationSetGuard
+  3: Operation for Memory + EFI_PAGES_TO_SIZE(NumberOfPages)       // GuardOperationNoAction or GuardOperationClearGuard
+
+**/
+VOID
+ClearGuardPageOnFreePages (
+  IN EFI_PHYSICAL_ADDRESS   Memory,
+  IN UINTN                  NumberOfPages,
+  OUT GUARD_OPERATION       *Operation
+  )
+{
+  GUARD_PAGE_TYPE   PreviousPageType;
+  GUARD_PAGE_TYPE   Previous2PageType;
+  GUARD_PAGE_TYPE   NextPageType;
+  GUARD_PAGE_TYPE   Next2PageType;
+
+  DEBUG ((EFI_D_INFO, "ClearGuardPageOnFreePages - 0x%lx (0x%x)\n", Memory, NumberOfPages));
+
+  ZeroMem (Operation, sizeof(GUARD_OPERATION) * 4);
+
+  PreviousPageType = GetGuardPageType (Memory - EFI_PAGES_TO_SIZE(1));
+  Previous2PageType = GetGuardPageType (Memory - EFI_PAGES_TO_SIZE(2));
+  if (PreviousPageType == GuardPageTypeGuarded) {
+    if (Previous2PageType != GuardPageTypeAllocatedUnguarded) {
+      ClearGuardPage (Memory - EFI_PAGES_TO_SIZE(1));
+      FreeGuardPage (Memory - EFI_PAGES_TO_SIZE(1));
+      if (Operation != NULL) {
+        Operation[0] = GuardOperationNoAction;
+      }
+    }
+  } else if (PreviousPageType == GuardPageTypeAllocatedUnguarded) {
+    AllocateGuardPage (Memory);
+    SetGuardPage (Memory);
+    if (Operation != NULL) {
+      Operation[1] = GuardOperationSetGuard;
+    }
+  } else {
+    ASSERT(FALSE);
+  }
+
+  NextPageType = GetGuardPageType (Memory + EFI_PAGES_TO_SIZE(NumberOfPages));
+  Next2PageType = GetGuardPageType (Memory + EFI_PAGES_TO_SIZE(NumberOfPages + 1));
+  if (NextPageType == GuardPageTypeGuarded) {
+    if (Next2PageType != GuardPageTypeAllocatedUnguarded) {
+      ClearGuardPage (Memory + EFI_PAGES_TO_SIZE(NumberOfPages));
+      FreeGuardPage (Memory + EFI_PAGES_TO_SIZE(NumberOfPages));
+      if (Operation != NULL) {
+        Operation[3] = GuardOperationNoAction;
+      }
+    }
+  } else if (NextPageType == GuardPageTypeAllocatedUnguarded) {
+    AllocateGuardPage (Memory + EFI_PAGES_TO_SIZE(NumberOfPages - 1));
+    SetGuardPage (Memory + EFI_PAGES_TO_SIZE(NumberOfPages - 1));
+    if (Operation != NULL) {
+      Operation[2] = GuardOperationSetGuard;
+    }
+  } else {
+    ASSERT(FALSE);
+  }
+
+//  DumpGuardPages ();
+}
+
+VOID
+SetGuardPageOnAllocatePoolPages (
+  IN EFI_PHYSICAL_ADDRESS   Memory,
+  IN UINTN                  NumberOfPages
+  )
+{
+  DEBUG ((EFI_D_INFO, "SetGuardPageOnAllocatePoolPages - 0x%lx (0x%x)\n", Memory, NumberOfPages));
+
+  SetGuardPage (Memory - EFI_PAGES_TO_SIZE(1));
+  SetGuardPage (Memory + EFI_PAGES_TO_SIZE(NumberOfPages));
+
+//  DumpGuardPages ();
+}
+
+VOID
+ClearGuardPageOnFreePoolPages (
+  IN EFI_PHYSICAL_ADDRESS   Memory,
+  IN UINTN                  NumberOfPages
+  )
+{
+  DEBUG ((EFI_D_INFO, "ClearGuardPageOnFreePoolPages - 0x%lx (0x%x)\n", Memory, NumberOfPages));
+
+  ClearGuardPage (Memory - EFI_PAGES_TO_SIZE(1));
+  FreeGuardPage (Memory - EFI_PAGES_TO_SIZE(1));
+
+  ClearGuardPage (Memory + EFI_PAGES_TO_SIZE(NumberOfPages));
+  FreeGuardPage (Memory + EFI_PAGES_TO_SIZE(NumberOfPages));
+
+//  DumpGuardPages();
+}
+
+
+/**
   Allocates pages from the memory map.
 
   @param[in]   Type                   The type of allocation to perform.
@@ -77,7 +709,9 @@ SmmInternalAllocatePagesEx (
   IN  EFI_MEMORY_TYPE       MemoryType,
   IN  UINTN                 NumberOfPages,
   OUT EFI_PHYSICAL_ADDRESS  *Memory,
-  IN  BOOLEAN               AddRegion
+  IN  BOOLEAN               PoolPage,
+  IN  BOOLEAN               AddRegion,
+  IN BOOLEAN                NeedGuard
   );
 
 /**
@@ -112,7 +746,9 @@ AllocateMemoryMapEntry (
                EfiRuntimeServicesData,
                EFI_SIZE_TO_PAGES(DEFAULT_PAGE_ALLOCATION),
                &Mem,
-               TRUE
+               FALSE,
+               TRUE,
+               FALSE
                );
     ASSERT_EFI_ERROR (Status);
     if(!EFI_ERROR (Status)) {
@@ -701,7 +1337,9 @@ SmmInternalAllocatePagesEx (
   IN  EFI_MEMORY_TYPE       MemoryType,
   IN  UINTN                 NumberOfPages,
   OUT EFI_PHYSICAL_ADDRESS  *Memory,
-  IN  BOOLEAN               AddRegion
+  IN  BOOLEAN               PoolPage,
+  IN  BOOLEAN               AddRegion,
+  IN BOOLEAN                NeedGuard
   )
 {
   UINTN  RequestedAddress;
@@ -709,6 +1347,10 @@ SmmInternalAllocatePagesEx (
   if (MemoryType != EfiRuntimeServicesCode &&
       MemoryType != EfiRuntimeServicesData) {
     return EFI_INVALID_PARAMETER;
+  }
+
+  if (FeaturePcdGet(PcdHeapPageGuard) && NeedGuard && !AddRegion) {
+    NumberOfPages += 2;
   }
 
   if (NumberOfPages > TRUNCATE_TO_PAGES ((UINTN)-1) + 1) {
@@ -754,6 +1396,15 @@ SmmInternalAllocatePagesEx (
     CoreFreeMemoryMapStack();
   }
 
+  if (FeaturePcdGet(PcdHeapPageGuard) && NeedGuard && !AddRegion) {
+    *Memory += EFI_PAGES_TO_SIZE(1);
+    if (PoolPage) {
+      SetGuardPageOnAllocatePoolPages (*Memory, NumberOfPages - 2);
+    } else {
+      SetGuardPageOnAllocatePages (*Memory, NumberOfPages - 2);
+    }
+  }
+
   return EFI_SUCCESS;
 }
 
@@ -779,10 +1430,28 @@ SmmInternalAllocatePages (
   IN  EFI_ALLOCATE_TYPE     Type,
   IN  EFI_MEMORY_TYPE       MemoryType,
   IN  UINTN                 NumberOfPages,
-  OUT EFI_PHYSICAL_ADDRESS  *Memory
+  OUT EFI_PHYSICAL_ADDRESS  *Memory,
+  IN BOOLEAN                PoolPage,
+  IN BOOLEAN                NeedGuard
   )
 {
-  return SmmInternalAllocatePagesEx (Type, MemoryType, NumberOfPages, Memory, FALSE);
+  return SmmInternalAllocatePagesEx (Type, MemoryType, NumberOfPages, Memory, PoolPage, FALSE, NeedGuard);
+}
+
+VOID *
+EFIAPI
+AllocatePagesForGuard (
+  IN UINTN  Pages
+  )
+{
+  EFI_PHYSICAL_ADDRESS Memory;
+  EFI_STATUS           Status;
+
+  Status = SmmInternalAllocatePages (AllocateAnyPages, EfiRuntimeServicesData, Pages, &Memory, FALSE, FALSE);
+  if (!EFI_ERROR (Status)) {
+    return (VOID *)(UINTN)Memory;
+  }
+  return NULL;
 }
 
 /**
@@ -811,8 +1480,18 @@ SmmAllocatePages (
   )
 {
   EFI_STATUS  Status;
+  BOOLEAN               NeedGuard;
+  EFI_PHYSICAL_ADDRESS  BasePage;
 
-  Status = SmmInternalAllocatePages (Type, MemoryType, NumberOfPages, Memory);
+  NeedGuard = FALSE;
+  if (FeaturePcdGet(PcdHeapPageGuard)) {
+    CheckGuardPages();
+    if (IsAllocateTypeForHeapGuard(Type) && IsMemoryTypeForHeapPageGuard(MemoryType)) {
+      NeedGuard = TRUE;
+    }
+  }
+
+  Status = SmmInternalAllocatePages (Type, MemoryType, NumberOfPages, Memory, FALSE, NeedGuard);
   if (!EFI_ERROR (Status)) {
     SmmCoreUpdateProfile (
       (EFI_PHYSICAL_ADDRESS) (UINTN) RETURN_ADDRESS (0),
@@ -822,6 +1501,25 @@ SmmAllocatePages (
       (VOID *) (UINTN) *Memory,
       NULL
       );
+    if (FeaturePcdGet(PcdHeapPageGuard) && NeedGuard) {
+      // we must defer heap guard here to avoid allocation re-entry issue.
+      BasePage = *Memory - EFI_PAGES_TO_SIZE(1);
+      SetMemoryPageAttributes (
+        NULL,
+        BasePage,
+        EFI_PAGES_TO_SIZE(1),
+        EFI_MEMORY_RP,
+        AllocatePagesForGuard
+        );
+      BasePage = *Memory + EFI_PAGES_TO_SIZE(NumberOfPages);
+      SetMemoryPageAttributes (
+        NULL,
+        BasePage,
+        EFI_PAGES_TO_SIZE(1),
+        EFI_MEMORY_RP,
+        AllocatePagesForGuard
+        );
+    }
   }
   return Status;
 }
@@ -853,6 +1551,26 @@ InternalMergeNodes (
   return Next;
 }
 
+EFI_MEMORY_TYPE
+GetMemoryTypeFromAddress (
+  IN EFI_PHYSICAL_ADDRESS  Address
+  )
+{
+  LIST_ENTRY               *Link;
+  MEMORY_MAP               *Entry;
+  
+  Link = gMemoryMap.ForwardLink;
+  while (Link != &gMemoryMap) {
+    Entry = CR (Link, MEMORY_MAP, Link, MEMORY_MAP_SIGNATURE);
+    Link  = Link->ForwardLink;
+    if (Entry->Start <= Address && Entry->End > Address) {
+      return Entry->Type;
+    }
+  }
+  ASSERT (FALSE);
+  return EfiConventionalMemory;
+}
+
 /**
   Frees previous allocated pages.
 
@@ -869,11 +1587,18 @@ EFI_STATUS
 SmmInternalFreePagesEx (
   IN EFI_PHYSICAL_ADDRESS  Memory,
   IN UINTN                 NumberOfPages,
-  IN BOOLEAN               AddRegion
+  IN BOOLEAN               PoolPage,
+  IN BOOLEAN               AddRegion,
+  OUT EFI_MEMORY_TYPE      *MemoryType,
+  OUT GUARD_OPERATION      *GuardOperation OPTIONAL
   )
 {
   LIST_ENTRY      *Node;
   FREE_PAGE_LIST  *Pages;
+  BOOLEAN         IsGuarded;
+  EFI_MEMORY_TYPE Type;
+
+  IsGuarded = FALSE;
 
   if (((Memory & EFI_PAGE_MASK) != 0) || (Memory == 0) || (NumberOfPages == 0)) {
     return EFI_INVALID_PARAMETER;
@@ -922,7 +1647,22 @@ SmmInternalFreePagesEx (
   if (!AddRegion) {
     CoreFreeMemoryMapStack();
   }
-
+  
+  if (!AddRegion) {
+    Type = GetMemoryTypeFromAddress (Memory);
+    if (MemoryType != NULL) {
+      *MemoryType = Type;
+    }
+    if (FeaturePcdGet(PcdHeapPageGuard)) {
+      if (IsMemoryTypeForHeapPageGuard(Type)) {
+        if (PoolPage) {
+          ClearGuardPageOnFreePoolPages (Memory, NumberOfPages);
+        } else {
+          ClearGuardPageOnFreePages (Memory, NumberOfPages, GuardOperation);
+        }
+      }
+    }
+  }
   return EFI_SUCCESS;
 }
 
@@ -941,10 +1681,13 @@ EFI_STATUS
 EFIAPI
 SmmInternalFreePages (
   IN EFI_PHYSICAL_ADDRESS  Memory,
-  IN UINTN                 NumberOfPages
+  IN UINTN                 NumberOfPages,
+  IN BOOLEAN               PoolPage,
+  OUT EFI_MEMORY_TYPE      *MemoryType,
+  OUT GUARD_OPERATION      *GuardOperation OPTIONAL
   )
 {
-  return SmmInternalFreePagesEx (Memory, NumberOfPages, FALSE);
+  return SmmInternalFreePagesEx (Memory, NumberOfPages, PoolPage, FALSE, MemoryType, GuardOperation);
 }
 
 /**
@@ -966,8 +1709,16 @@ SmmFreePages (
   )
 {
   EFI_STATUS  Status;
+  EFI_MEMORY_TYPE       MemoryType;
+  GUARD_OPERATION       GuardOperation[4];
+  UINTN                 Index;
+  EFI_PHYSICAL_ADDRESS  BasePage;
 
-  Status = SmmInternalFreePages (Memory, NumberOfPages);
+  if (FeaturePcdGet(PcdHeapPageGuard)) {
+    CheckGuardPages();
+  }
+
+  Status = SmmInternalFreePages (Memory, NumberOfPages, FALSE, &MemoryType, GuardOperation);
   if (!EFI_ERROR (Status)) {
     SmmCoreUpdateProfile (
       (EFI_PHYSICAL_ADDRESS) (UINTN) RETURN_ADDRESS (0),
@@ -977,6 +1728,52 @@ SmmFreePages (
       (VOID *) (UINTN) Memory,
       NULL
       );
+    if (FeaturePcdGet(PcdHeapPageGuard)) {
+      // we must defer heap guard here to avoid allocation re-entry issue.
+      if (IsMemoryTypeForHeapPageGuard(MemoryType)) {
+        for (Index = 0; Index < 4; Index++) {
+          switch(Index) {
+          case 0:
+            BasePage = Memory - EFI_PAGES_TO_SIZE(1);
+            break;
+          case 1:
+            BasePage = Memory;
+            break;
+          case 2:
+            BasePage = Memory + EFI_PAGES_TO_SIZE(NumberOfPages - 1);
+            break;
+          case 3:
+            BasePage = Memory + EFI_PAGES_TO_SIZE(NumberOfPages);
+            break;
+          }
+          switch(GuardOperation[Index]) {
+          case GuardOperationSetGuard:
+            SetMemoryPageAttributes (
+              NULL,
+              BasePage,
+              EFI_PAGES_TO_SIZE(1),
+              EFI_MEMORY_RP,
+              AllocatePagesForGuard
+              );
+            break;
+          case GuardOperationClearGuard:
+            ClearMemoryPageAttributes (
+              NULL,
+              BasePage,
+              EFI_PAGES_TO_SIZE(1),
+              EFI_MEMORY_RP,
+              AllocatePagesForGuard
+              );
+            break;
+          case GuardOperationNoAction:
+            break;
+          default:
+            ASSERT(FALSE);
+            break;
+          }
+        }
+      }
+    }
   }
   return Status;
 }
@@ -1021,7 +1818,7 @@ SmmAddMemoryRegion (
   AlignedMemBase = (UINTN)(MemBase + EFI_PAGE_MASK) & ~EFI_PAGE_MASK;
   MemLength -= AlignedMemBase - MemBase;
   if (Type == EfiConventionalMemory) {
-    SmmInternalFreePagesEx (AlignedMemBase, TRUNCATE_TO_PAGES ((UINTN)MemLength), TRUE);
+    SmmInternalFreePagesEx (AlignedMemBase, TRUNCATE_TO_PAGES ((UINTN)MemLength), FALSE, TRUE, NULL, NULL);
   } else {
     ConvertSmmMemoryMapEntry (EfiRuntimeServicesData, AlignedMemBase, TRUNCATE_TO_PAGES ((UINTN)MemLength), TRUE);
   }

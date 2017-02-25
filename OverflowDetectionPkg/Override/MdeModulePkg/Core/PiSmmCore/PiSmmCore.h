@@ -330,7 +330,9 @@ SmmInternalAllocatePages (
   IN      EFI_ALLOCATE_TYPE         Type,
   IN      EFI_MEMORY_TYPE           MemoryType,
   IN      UINTN                     NumberOfPages,
-  OUT     EFI_PHYSICAL_ADDRESS      *Memory
+  OUT     EFI_PHYSICAL_ADDRESS      *Memory,
+  IN      BOOLEAN                   PoolPage,
+  IN      BOOLEAN                   NeedGuard
   );
 
 /**
@@ -351,6 +353,12 @@ SmmFreePages (
   IN      UINTN                     NumberOfPages
   );
 
+typedef enum {
+  GuardOperationNoAction,
+  GuardOperationSetGuard,
+  GuardOperationClearGuard,
+} GUARD_OPERATION;
+
 /**
   Frees previous allocated pages.
 
@@ -366,7 +374,10 @@ EFI_STATUS
 EFIAPI
 SmmInternalFreePages (
   IN      EFI_PHYSICAL_ADDRESS      Memory,
-  IN      UINTN                     NumberOfPages
+  IN      UINTN                     NumberOfPages,
+  IN      BOOLEAN                   PoolPage,
+  OUT     EFI_MEMORY_TYPE           *MemoryType,
+  OUT     GUARD_OPERATION           *GuardOperation OPTIONAL
   );
 
 /**
@@ -408,7 +419,9 @@ EFIAPI
 SmmInternalAllocatePool (
   IN      EFI_MEMORY_TYPE           PoolType,
   IN      UINTN                     Size,
-  OUT     VOID                      **Buffer
+  OUT     VOID                      **Buffer,
+  IN      BOOLEAN                   NeedGuard,
+  OUT     UINTN                     *AllocatedPages OPTIONAL
   );
 
 /**
@@ -438,7 +451,7 @@ SmmFreePool (
 EFI_STATUS
 EFIAPI
 SmmInternalFreePool (
-  IN      VOID                      *Buffer
+  IN      VOID                      *Buffe
   );
 
 /**

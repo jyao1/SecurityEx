@@ -44,6 +44,7 @@
 [Packages]
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
+  OverflowDetectionPkg/OverflowDetectionPkg.dec
   
 [LibraryClasses]
   UefiDriverEntryPoint
@@ -65,6 +66,7 @@
   HobLib
   SmmMemLib
   DxeServicesLib
+  PageTableLib
 
 [Protocols]
   gEfiDxeSmmReadyToLockProtocolGuid             ## UNDEFINED # SmiHandlerRegister
@@ -89,6 +91,9 @@
   gEfiSmmIoTrapDispatch2ProtocolGuid            ## SOMETIMES_CONSUMES
   gEfiSmmUsbDispatch2ProtocolGuid               ## SOMETIMES_CONSUMES
 
+[FeaturePcd]
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPageGuard                  ## CONSUMES
+
 [Pcd]
   gEfiMdeModulePkgTokenSpaceGuid.PcdLoadFixAddressSmmCodePageNumber     ## SOMETIMES_CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdLoadModuleAtFixAddressEnable        ## CONSUMES
@@ -96,6 +101,9 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdMemoryProfilePropertyMask           ## CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdMemoryProfileDriverPath             ## CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdSmiHandlerProfilePropertyMask       ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardDirection          ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPageGuardTypeMask           ## CONSUMES
+  gEfiOverflowDetectionPkgTokenSpaceGuid.PcdHeapPoolGuardTypeMask           ## CONSUMES
 
 [Guids]
   gAprioriGuid                                  ## SOMETIMES_CONSUMES   ## File
