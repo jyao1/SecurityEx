@@ -56,6 +56,61 @@ UINTN         mFreeMapStack = 0;
 ///
 LIST_ENTRY   mFreeMemoryMapEntryList = INITIALIZE_LIST_HEAD_VARIABLE (mFreeMemoryMapEntryList);
 
+BOOLEAN mIsSmmCpuMode=FALSE;
+
+RETURN_STATUS
+EFIAPI
+SetMemoryPageAttributesWrapper (
+  IN  PAGE_TABLE_LIB_PAGING_CONTEXT     *PagingContext OPTIONAL,
+  IN  PHYSICAL_ADDRESS                  BaseAddress,
+  IN  UINT64                            Length,
+  IN  UINT64                            Attributes,
+  IN  PAGE_TABLE_LIB_ALLOCATE_PAGES     AllocatePagesFunc OPTIONAL
+  )
+{
+  if (!mIsSmmCpuMode) {
+    return EFI_UNSUPPORTED;
+  }
+  return SetMemoryPageAttributes (PagingContext, BaseAddress, Length, Attributes, AllocatePagesFunc);
+}
+
+RETURN_STATUS
+EFIAPI
+ClearMemoryPageAttributesWrapper (
+  IN  PAGE_TABLE_LIB_PAGING_CONTEXT     *PagingContext OPTIONAL,
+  IN  PHYSICAL_ADDRESS                  BaseAddress,
+  IN  UINT64                            Length,
+  IN  UINT64                            Attributes,
+  IN  PAGE_TABLE_LIB_ALLOCATE_PAGES     AllocatePagesFunc OPTIONAL
+  )
+{
+  if (!mIsSmmCpuMode) {
+    return EFI_UNSUPPORTED;
+  }
+  return ClearMemoryPageAttributes (PagingContext, BaseAddress, Length, Attributes, AllocatePagesFunc);
+}
+
+RETURN_STATUS
+EFIAPI
+GetMemoryPageAttributesWrapper (
+  IN  PAGE_TABLE_LIB_PAGING_CONTEXT     *PagingContext OPTIONAL,
+  IN  PHYSICAL_ADDRESS                  BaseAddress,
+  OUT UINT64                            *Attributes,
+  OUT UINT64                            *PageSize
+  )
+{
+  if (!mIsSmmCpuMode) {
+    if (Attributes != NULL) {
+      *Attributes = 0;
+    }
+    if (PageSize != NULL) {
+      *PageSize = SIZE_4GB;
+    }
+    return EFI_SUCCESS;
+  }
+  return GetMemoryPageAttributes (PagingContext, BaseAddress, Attributes, PageSize);
+}
+
 /**
   Update SMM memory map entry.
 
@@ -154,7 +209,7 @@ IsTheGuardPageGuarded(
     return FALSE;
   }
 
-  Status = GetMemoryPageAttributes(
+  Status = GetMemoryPageAttributesWrapper(
              NULL,
              Address,
              &Attributes,
@@ -179,7 +234,7 @@ UnguardTheGuardPage (
     return;
   }
 
-  ClearMemoryPageAttributes (
+  ClearMemoryPageAttributesWrapper (
     NULL,
     Address,
     EFI_PAGES_TO_SIZE(1),
@@ -199,7 +254,7 @@ GuardTheGuardPage (
     return;
   }
 
-  SetMemoryPageAttributes (
+  SetMemoryPageAttributesWrapper (
     NULL,
     Address,
     EFI_PAGES_TO_SIZE(1),
@@ -274,6 +329,33 @@ CheckGuardPages(
       ASSERT(GuardPageHead->Address == (UINTN)GuardPageHead);
       ASSERT(GuardPageHead->Address == GuardPageTail->Address);
     }
+  }
+}
+
+VOID
+GuardAllGuardPages(
+  VOID
+  )
+{
+  LIST_ENTRY      *Link;
+  GUARD_PAGE_HEAD *GuardPageHead;
+  GUARD_PAGE_TAIL *GuardPageTail;
+
+  for (Link = mGuardPageList.ForwardLink; Link != &mGuardPageList; ) {
+    GuardPageHead = BASE_CR(Link, GUARD_PAGE_HEAD, Link);
+
+    if (IsTheGuardPageGuarded((UINTN)GuardPageHead & ~(SIZE_4KB - 1))) {
+      return;
+    }
+
+    ASSERT(GuardPageHead->Signature == GUARD_PAGE_HEAD_SIGNATURE);
+    Link = Link->ForwardLink;
+    GuardPageTail = BASE_CR(Link, GUARD_PAGE_HEAD, Link);
+    ASSERT(GuardPageTail->Signature == GUARD_PAGE_TAIL_SIGNATURE);
+    Link = Link->ForwardLink;
+
+    GuardTheGuardPage ((UINTN)GuardPageHead & ~(SIZE_4KB - 1));
+    ASSERT(((UINTN)GuardPageTail & ~(SIZE_4KB - 1)) == ((UINTN)GuardPageHead & ~(SIZE_4KB - 1)));
   }
 }
 
@@ -373,7 +455,7 @@ FreeGuardPage(
   @return ListHead
 
 **/
-LIST_ENTRY *
+VOID
 EFIAPI
 InsertHeadListGuarded (
   IN OUT  LIST_ENTRY                *ListHead,
@@ -396,9 +478,9 @@ InsertHeadListGuarded (
   ListHead->ForwardLink = Entry;
 
   if (IsEntryForwardLinkGuarded) {
-    UnguardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
+    GuardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
   }
-  return ListHead;
+  return ;
 }
 
 /**
@@ -423,7 +505,7 @@ InsertHeadListGuarded (
   @return ListHead
 
 **/
-LIST_ENTRY *
+VOID
 EFIAPI
 InsertTailListGuarded (
   IN OUT  LIST_ENTRY                *ListHead,
@@ -446,9 +528,9 @@ InsertTailListGuarded (
   ListHead->BackLink = Entry;
 
   if (IsEntryBackLinkGuarded) {
-    UnguardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
+    GuardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
   }
-  return ListHead;
+  return ;
 }
 
 /**
@@ -472,7 +554,7 @@ InsertTailListGuarded (
   @return Entry.
 
 **/
-LIST_ENTRY *
+VOID
 EFIAPI
 RemoveEntryListGuarded (
   IN      CONST LIST_ENTRY          *Entry
@@ -497,12 +579,12 @@ RemoveEntryListGuarded (
   Entry->BackLink->ForwardLink = Entry->ForwardLink;
 
   if (IsEntryForwardLinkGuarded) {
-    UnguardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
+    GuardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
   }
   if (IsEntryBackLinkGuarded) {
-    UnguardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
+    GuardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
   }
-  return Entry->ForwardLink;
+  return ;
 }
 
 
@@ -685,6 +767,24 @@ ClearGuardPageOnFreePoolPages (
 //  DumpGuardPages();
 }
 
+
+VOID
+SmmEntryPointMemoryManagementHook (
+  VOID
+  )
+{
+  EFI_STATUS  Status;
+  VOID        *SmmCpu;
+
+  if (!mIsSmmCpuMode) {
+    Status = SmmLocateProtocol (&gEfiSmmCpuProtocolGuid, NULL, &SmmCpu);
+    if (!EFI_ERROR(Status)) {
+      mIsSmmCpuMode = TRUE;
+      DEBUG ((EFI_D_INFO, "GuardAllGuardPages\n"));
+      GuardAllGuardPages ();
+    }
+  }
+}
 
 /**
   Allocates pages from the memory map.
@@ -1504,7 +1604,7 @@ SmmAllocatePages (
     if (FeaturePcdGet(PcdHeapPageGuard) && NeedGuard) {
       // we must defer heap guard here to avoid allocation re-entry issue.
       BasePage = *Memory - EFI_PAGES_TO_SIZE(1);
-      SetMemoryPageAttributes (
+      SetMemoryPageAttributesWrapper (
         NULL,
         BasePage,
         EFI_PAGES_TO_SIZE(1),
@@ -1512,7 +1612,7 @@ SmmAllocatePages (
         AllocatePagesForGuard
         );
       BasePage = *Memory + EFI_PAGES_TO_SIZE(NumberOfPages);
-      SetMemoryPageAttributes (
+      SetMemoryPageAttributesWrapper (
         NULL,
         BasePage,
         EFI_PAGES_TO_SIZE(1),
@@ -1748,7 +1848,7 @@ SmmFreePages (
           }
           switch(GuardOperation[Index]) {
           case GuardOperationSetGuard:
-            SetMemoryPageAttributes (
+            SetMemoryPageAttributesWrapper (
               NULL,
               BasePage,
               EFI_PAGES_TO_SIZE(1),
@@ -1757,7 +1857,7 @@ SmmFreePages (
               );
             break;
           case GuardOperationClearGuard:
-            ClearMemoryPageAttributes (
+            ClearMemoryPageAttributesWrapper (
               NULL,
               BasePage,
               EFI_PAGES_TO_SIZE(1),

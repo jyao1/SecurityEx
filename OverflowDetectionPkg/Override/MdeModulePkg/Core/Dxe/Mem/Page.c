@@ -422,7 +422,7 @@ FreeGuardPage(
   @return ListHead
 
 **/
-LIST_ENTRY *
+VOID
 EFIAPI
 InsertHeadListGuarded (
   IN OUT  LIST_ENTRY                *ListHead,
@@ -445,9 +445,9 @@ InsertHeadListGuarded (
   ListHead->ForwardLink = Entry;
 
   if (IsEntryForwardLinkGuarded) {
-    UnguardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
+    GuardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
   }
-  return ListHead;
+  return ;
 }
 
 /**
@@ -472,7 +472,7 @@ InsertHeadListGuarded (
   @return ListHead
 
 **/
-LIST_ENTRY *
+VOID
 EFIAPI
 InsertTailListGuarded (
   IN OUT  LIST_ENTRY                *ListHead,
@@ -495,9 +495,9 @@ InsertTailListGuarded (
   ListHead->BackLink = Entry;
 
   if (IsEntryBackLinkGuarded) {
-    UnguardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
+    GuardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
   }
-  return ListHead;
+  return ;
 }
 
 /**
@@ -521,7 +521,7 @@ InsertTailListGuarded (
   @return Entry.
 
 **/
-LIST_ENTRY *
+VOID
 EFIAPI
 RemoveEntryListGuarded (
   IN      CONST LIST_ENTRY          *Entry
@@ -546,12 +546,12 @@ RemoveEntryListGuarded (
   Entry->BackLink->ForwardLink = Entry->ForwardLink;
 
   if (IsEntryForwardLinkGuarded) {
-    UnguardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
+    GuardTheGuardPage((UINTN)Entry->ForwardLink & ~(SIZE_4KB - 1));
   }
   if (IsEntryBackLinkGuarded) {
-    UnguardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
+    GuardTheGuardPage((UINTN)Entry->BackLink & ~(SIZE_4KB - 1));
   }
-  return Entry->ForwardLink;
+  return ;
 }
 
 

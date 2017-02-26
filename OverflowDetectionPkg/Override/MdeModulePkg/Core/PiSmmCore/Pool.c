@@ -22,6 +22,35 @@ LIST_ENTRY  mSmmPoolLists[SmmPoolTypeMax][MAX_POOL_INDEX];
 //
 GLOBAL_REMOVE_IF_UNREFERENCED  EFI_PHYSICAL_ADDRESS       gLoadModuleAtFixAddressSmramBase = 0;
 
+RETURN_STATUS
+EFIAPI
+SetMemoryPageAttributesWrapper (
+  IN  PAGE_TABLE_LIB_PAGING_CONTEXT     *PagingContext OPTIONAL,
+  IN  PHYSICAL_ADDRESS                  BaseAddress,
+  IN  UINT64                            Length,
+  IN  UINT64                            Attributes,
+  IN  PAGE_TABLE_LIB_ALLOCATE_PAGES     AllocatePagesFunc OPTIONAL
+  );
+
+RETURN_STATUS
+EFIAPI
+ClearMemoryPageAttributesWrapper (
+  IN  PAGE_TABLE_LIB_PAGING_CONTEXT     *PagingContext OPTIONAL,
+  IN  PHYSICAL_ADDRESS                  BaseAddress,
+  IN  UINT64                            Length,
+  IN  UINT64                            Attributes,
+  IN  PAGE_TABLE_LIB_ALLOCATE_PAGES     AllocatePagesFunc OPTIONAL
+  );
+
+RETURN_STATUS
+EFIAPI
+GetMemoryPageAttributesWrapper (
+  IN  PAGE_TABLE_LIB_PAGING_CONTEXT     *PagingContext OPTIONAL,
+  IN  PHYSICAL_ADDRESS                  BaseAddress,
+  OUT UINT64                            *Attributes,
+  OUT UINT64                            *PageSize
+  );
+
 VOID *
 EFIAPI
 AllocatePagesForGuard (
@@ -373,7 +402,7 @@ SmmAllocatePool (
       BasePage = (UINTN)*Buffer - sizeof(POOL_HEADER);
       BasePage = BasePage & ~(EFI_PAGE_SIZE - 1);
       BasePage = BasePage - EFI_PAGES_TO_SIZE(1);
-      SetMemoryPageAttributes (
+      SetMemoryPageAttributesWrapper (
         NULL,
         BasePage,
         EFI_PAGES_TO_SIZE(1),
@@ -383,7 +412,7 @@ SmmAllocatePool (
       BasePage = (UINTN)*Buffer - sizeof(POOL_HEADER);
       BasePage = BasePage & ~(EFI_PAGE_SIZE - 1);
       BasePage = BasePage + EFI_PAGES_TO_SIZE(AllocatedPages);
-      SetMemoryPageAttributes (
+      SetMemoryPageAttributesWrapper (
         NULL,
         BasePage,
         EFI_PAGES_TO_SIZE(1),

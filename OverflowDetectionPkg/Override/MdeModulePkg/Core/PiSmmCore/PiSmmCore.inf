@@ -81,7 +81,7 @@
   gEdkiiSmmExitBootServicesProtocolGuid         ## SOMETIMES_PRODUCES
   gEdkiiSmmLegacyBootProtocolGuid               ## SOMETIMES_PRODUCES
   gEdkiiSmmReadyToBootProtocolGuid              ## PRODUCES
-
+  gEfiSmmCpuProtocolGuid                        ## SOMETIMES_CONSUMES
   gEfiSmmSwDispatch2ProtocolGuid                ## SOMETIMES_CONSUMES
   gEfiSmmSxDispatch2ProtocolGuid                ## SOMETIMES_CONSUMES
   gEfiSmmPowerButtonDispatch2ProtocolGuid       ## SOMETIMES_CONSUMES

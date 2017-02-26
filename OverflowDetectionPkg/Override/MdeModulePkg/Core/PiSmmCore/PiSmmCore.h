@@ -424,6 +424,11 @@ SmmInternalAllocatePool (
   OUT     UINTN                     *AllocatedPages OPTIONAL
   );
 
+VOID
+SmmEntryPointMemoryManagementHook (
+  VOID
+  );
+
 /**
   Frees pool.
 
