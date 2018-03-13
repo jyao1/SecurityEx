@@ -34,4 +34,4 @@
   BaseMemoryLib
 
 [Depex]
-  TRUE
+  gEfiSmmCpuProtocolGuid

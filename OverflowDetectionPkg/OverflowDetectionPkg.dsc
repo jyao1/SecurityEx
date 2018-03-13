@@ -180,12 +180,6 @@
   OverflowDetectionPkg/Library/PageTableLibX86Pae/PageTableLibX86Pae.inf
   OverflowDetectionPkg/Library/PageTableLibNull/PageTableLibNull.inf
 
-  OverflowDetectionPkg/StackGuard/StackGuard.inf
-  OverflowDetectionPkg/NullPointerProtection/NullPointerProtection.inf
-
-  OverflowDetectionPkg/Override/MdeModulePkg/Core/PiSmmCore/PiSmmCore.inf
-  OverflowDetectionPkg/Override/MdeModulePkg/Core/Dxe/DxeMain.inf
-  
   OverflowDetectionPkg/Test/StackOverflow/StackOverflow.inf
   OverflowDetectionPkg/Test/StackOverflow/StackOverflowSmm.inf
   
@@ -204,5 +198,12 @@
   OverflowDetectionPkg/Test/DoubleFree/DoubleFreePage.inf
   OverflowDetectionPkg/Test/DoubleFree/DoubleFreePageSmm.inf
 
+  OverflowDetectionPkg/Test/PartialFree/PartialFreePage.inf
+  OverflowDetectionPkg/Test/PartialFree/PartialFreePageSmm.inf
+
   OverflowDetectionPkg/Test/WriteCodeSection/WriteCodeSectionSmm.inf
   OverflowDetectionPkg/Test/ExecDataSection/ExecDataSectionSmm.inf
+
+  OverflowDetectionPkg/Test/RingSwitch/RingSwitch.inf
+  OverflowDetectionPkg/Test/RingSwitch/RingSwitchSmm.inf
+  OverflowDetectionPkg/Test/RingSwitch/RingSwitchSmmApp.inf

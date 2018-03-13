@@ -13,15 +13,15 @@
 
 [Defines]
   INF_VERSION                    = 0x00010005
-  BASE_NAME                      = HeapOverflowDownPoolSmm
-  FILE_GUID                      = 8C81BE89-0E3A-43E7-9407-6EB231FF8460
+  BASE_NAME                      = PartialFreePageSmm
+  FILE_GUID                      = 062ABB58-6EC2-4986-BFE2-7532C7F810FC
   MODULE_TYPE                    = DXE_SMM_DRIVER
   VERSION_STRING                 = 1.0
   PI_SPECIFICATION_VERSION       = 0x0001000A
-  ENTRY_POINT                    = HeapOverflowDownPoolEntrypoint
+  ENTRY_POINT                    = PartialFreePageEntrypoint
 
 [Sources]
-  HeapOverflowDownPool.c
+  PartialFreePage.c
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -31,7 +31,6 @@
   BaseLib
   DebugLib
   MemoryAllocationLib
-  BaseMemoryLib
 
 [Depex]
   gEfiSmmCpuProtocolGuid

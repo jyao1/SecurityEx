@@ -13,25 +13,34 @@
 
 [Defines]
   INF_VERSION                    = 0x00010005
-  BASE_NAME                      = HeapOverflowDownPoolSmm
-  FILE_GUID                      = 8C81BE89-0E3A-43E7-9407-6EB231FF8460
+  BASE_NAME                      = RingSwitchSmm
+  FILE_GUID                      = EC9D96CC-9010-4761-93B7-5CB9B30B9A68
   MODULE_TYPE                    = DXE_SMM_DRIVER
   VERSION_STRING                 = 1.0
   PI_SPECIFICATION_VERSION       = 0x0001000A
-  ENTRY_POINT                    = HeapOverflowDownPoolEntrypoint
+  ENTRY_POINT                    = RingSwitchEntrypoint
 
 [Sources]
-  HeapOverflowDownPool.c
+  RingSwitchSmm.c
+  CpuDump.c
+
+[Sources.Ia32]
+  Ia32/Ring.nasm
+
+[Sources.X64]
+  X64/Ring.nasm
 
 [Packages]
   MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
 
 [LibraryClasses]
   UefiDriverEntryPoint
   BaseLib
   DebugLib
-  MemoryAllocationLib
   BaseMemoryLib
+  MemoryAllocationLib
+  SmmServicesTableLib
 
 [Depex]
   gEfiSmmCpuProtocolGuid

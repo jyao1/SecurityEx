@@ -33,4 +33,4 @@
   MemoryAllocationLib
 
 [Depex]
-  TRUE
+  gEfiSmmCpuProtocolGuid
