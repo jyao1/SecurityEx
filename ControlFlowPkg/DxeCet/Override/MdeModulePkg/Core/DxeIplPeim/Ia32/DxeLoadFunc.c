@@ -88,7 +88,6 @@ typedef union {
 #define IA32_PG_PAT_4K              IA32_PG_PS
 #define IA32_PG_NX                  (1ull << 63)
 
-BOOLEAN  PcdCpuCetEnable = TRUE;
 BOOLEAN  PcdCpuStackGuard = TRUE;
 UINTN    PcdCpuShadowStackSize = SIZE_16KB;
 BOOLEAN  PcdCpuCetXssEnable = TRUE;
@@ -108,7 +107,7 @@ ToSplitPageTableForCet (
 {
   UINTN  ShadowStackGuardSize;
 
-  if (PcdCpuCetEnable && mCetSupported) {
+  if (((PcdGet32(PcdControlFlowEnforcementPropertyMask) & 0x2) != 0) && mCetSupported) {
     if (PcdCpuStackGuard) {
       ShadowStackGuardSize = EFI_PAGES_TO_SIZE (2);
     } else {
@@ -138,7 +137,7 @@ InitShadowStack (
 {
   UINT64  *InterruptSspTable;
 
-  if (PcdCpuCetEnable && PcdCpuStackGuard && mCetSupported) {
+  if (((PcdGet32(PcdControlFlowEnforcementPropertyMask) & 0x2) != 0) && PcdCpuStackGuard && mCetSupported) {
     mInterruptSspTables = (UINTN)AllocatePool(sizeof(UINT64) * 8);
     ASSERT (mInterruptSspTables != 0);
     DEBUG ((DEBUG_INFO, "mInterruptSspTables - 0x%x\n", mInterruptSspTables));
@@ -239,7 +238,7 @@ InitCet (
   UINTN                      ShadowStackGuardSize;
   UINTN                      Pl0Ssp;
 
-  if (PcdCpuCetEnable) {
+  if (((PcdGet32(PcdControlFlowEnforcementPropertyMask) & 0x2) != 0)) {
     AsmCpuidEx(7, 0, NULL, NULL, &RegEcx, NULL);
     DEBUG ((EFI_D_INFO, "CPUID[7/0] ECX - 0x%08x\n", RegEcx));
     DEBUG ((EFI_D_INFO, "  CET_SS  - 0x%08x\n", RegEcx & CPUID_CET_SS));
@@ -258,7 +257,7 @@ InitCet (
     DEBUG ((EFI_D_INFO, "CPUID[D/12] EAX - 0x%08x, ECX - 0x%08x\n", RegEax, RegEcx));
   }
 
-  if (PcdCpuCetEnable && mCetSupported) {
+  if (((PcdGet32(PcdControlFlowEnforcementPropertyMask) & 0x2) != 0) && mCetSupported) {
     mShadowStackSize = EFI_PAGES_TO_SIZE (EFI_SIZE_TO_PAGES (PcdCpuShadowStackSize));
     if (PcdCpuStackGuard) {
       ShadowStackGuardSize = EFI_PAGES_TO_SIZE (2);
@@ -294,7 +293,7 @@ EnableCet (
       ShadowStackGuardSize = 0;
     }
 
-  if (PcdCpuCetEnable && mCetSupported) {
+  if (((PcdGet32(PcdControlFlowEnforcementPropertyMask) & 0x2) != 0) && mCetSupported) {
     SetShadowStack (
       PageTables,
       (EFI_PHYSICAL_ADDRESS)(UINTN)mShadowStacks,
@@ -677,7 +676,7 @@ HandOffToDxeCore (
     // Interrupts will not get turned on until the CPU AP is loaded.
     // Call x64 drivers passing in single argument, a pointer to the HOBs.
     //
-    if (PcdCpuCetEnable && mCetSupported) {
+    if (((PcdGet32(PcdControlFlowEnforcementPropertyMask) & 0x2) != 0) && mCetSupported) {
       AsmEnablePaging64 (
         SYS_CODE64_SEL,
         (EFI_PHYSICAL_ADDRESS)(UINTN)DxeCoreEntryPointTrampline,

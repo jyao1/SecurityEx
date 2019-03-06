@@ -13,6 +13,7 @@
 ;
 ;**/
 
+    %include "Nasm.inc"
     SECTION .text
 
 ;
@@ -88,7 +89,7 @@ ASM_PFX(DxeCoreEntryPointTrampline):
     bts     eax, 23                     ; set CET
     mov     cr4, eax
 
-    DB      0xF3, 0x0F, 0x01, 0xE8 ; SETSSBSY
+    SETSSBSY
 
     jmp     edx
 
