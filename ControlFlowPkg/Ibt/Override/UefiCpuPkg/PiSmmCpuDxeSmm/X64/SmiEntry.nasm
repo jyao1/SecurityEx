@@ -19,6 +19,7 @@
 ;-------------------------------------------------------------------------------
 
 %include "StuffRsbNasm.inc"
+%include "Nasm.inc"
 
 ;
 ; Variables referrenced by C code
@@ -218,7 +219,7 @@ ASM_PFX(mPatchCetSupported):
     push    rax
 
     mov     ecx, MSR_IA32_S_CET
-    mov     eax, MSR_IA32_CET_SH_STK_EN
+    mov     eax, MSR_IA32_CET_SH_STK_EN | MSR_IA32_CET_ENDBR_EN
     xor     edx, edx
     wrmsr
 
@@ -256,7 +257,7 @@ CetInterruptDone:
     mov     eax, 0x668 | CR4_CET
     mov     cr4, rax
 
-    DB 0xF3, 0x0F, 0x01, 0xE8 ; SETSSBSY
+    SETSSBSY
 
 CetDone:
 

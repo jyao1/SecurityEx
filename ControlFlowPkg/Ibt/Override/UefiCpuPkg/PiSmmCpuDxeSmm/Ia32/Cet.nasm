@@ -10,6 +10,8 @@
 ;
 ;-------------------------------------------------------------------------------
 
+%include "Nasm.inc"
+
 SECTION .text
 
 global ASM_PFX(DisableCet)
@@ -17,7 +19,7 @@ ASM_PFX(DisableCet):
 
     ; Skip the pushed data for call
     mov     eax, 1
-    DB      0xF3, 0x0F, 0xAE, 0xE8       ; INCSSP RAX
+    INCSSP_EAX
 
     mov     eax, cr4
     btr     eax, 23                      ; clear CET

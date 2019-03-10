@@ -940,7 +940,7 @@ CheckFeatureSupported (
   UINT32                         RegEdx;
   MSR_IA32_MISC_ENABLE_REGISTER  MiscEnableMsr;
 
-  if (FeaturePcdGet (PcdCpuSmmCetEnable) && mCetSupported) {
+  if ((PcdGet32 (PcdControlFlowEnforcementPropertyMask) != 0) && mCetSupported) {
     AsmCpuid (CPUID_EXTENDED_FUNCTION, &RegEax, NULL, NULL, NULL);
     if (RegEax <= CPUID_EXTENDED_FUNCTION) {
       mCetSupported = FALSE;

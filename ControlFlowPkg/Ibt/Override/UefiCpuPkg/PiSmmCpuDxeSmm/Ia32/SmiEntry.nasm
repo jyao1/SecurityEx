@@ -19,6 +19,7 @@
 ;-------------------------------------------------------------------------------
 
 %include "StuffRsbNasm.inc"
+%include "Nasm.inc"
 
 %define MSR_IA32_S_CET                     0x6A2
 %define   MSR_IA32_CET_SH_STK_EN             0x1
@@ -210,7 +211,7 @@ ASM_PFX(mPatchCetSupported):
     push    eax
 
     mov     ecx, MSR_IA32_S_CET
-    mov     eax, MSR_IA32_CET_SH_STK_EN
+    mov     eax, MSR_IA32_CET_SH_STK_EN | MSR_IA32_CET_ENDBR_EN
     xor     edx, edx
     wrmsr
 
@@ -242,7 +243,7 @@ CetInterruptDone:
     mov     eax, 0x668 | CR4_CET
     mov     cr4, eax
 
-    DB 0xF3, 0x0F, 0x01, 0xE8 ; SETSSBSY
+    SETSSBSY
 
 CetDone:
 

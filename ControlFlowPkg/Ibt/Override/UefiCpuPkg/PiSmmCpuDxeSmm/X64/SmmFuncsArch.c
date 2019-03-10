@@ -180,7 +180,7 @@ InitShadowStack (
   UINTN       SmmShadowStackSize;
   UINT64      *InterruptSspTable;
 
-  if (FeaturePcdGet (PcdCpuSmmCetEnable) && mCetSupported) {
+  if ((PcdGet32 (PcdControlFlowEnforcementPropertyMask) != 0) && mCetSupported) {
     SmmShadowStackSize = EFI_PAGES_TO_SIZE (EFI_SIZE_TO_PAGES (PcdGet32 (PcdCpuSmmShadowStackSize)));
     if (FeaturePcdGet (PcdCpuSmmStackGuard)) {
       SmmShadowStackSize += EFI_PAGES_TO_SIZE (2);

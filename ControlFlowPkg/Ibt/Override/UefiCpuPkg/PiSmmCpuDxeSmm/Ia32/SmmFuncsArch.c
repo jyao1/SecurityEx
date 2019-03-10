@@ -123,7 +123,7 @@ InitGdt (
       //
       // Setup ShadowStack for stack switch
       //
-      if (FeaturePcdGet (PcdCpuSmmCetEnable) && mCetSupported) {
+      if ((PcdGet32 (PcdControlFlowEnforcementPropertyMask) != 0) && mCetSupported) {
         InterruptShadowStack = (UINTN)(mSmmStackArrayBase + mSmmStackSize + EFI_PAGES_TO_SIZE (1) - sizeof(UINT64) + (mSmmStackSize + mSmmShadowStackSize) * Index);
         *(UINT32 *)(TssBase + TSS_IA32_SSP_OFFSET) = (UINT32)InterruptShadowStack;
       }
@@ -189,7 +189,7 @@ InitShadowStack (
 {
   UINTN       SmmShadowStackSize;
 
-  if (FeaturePcdGet (PcdCpuSmmCetEnable) && mCetSupported) {
+  if ((PcdGet32 (PcdControlFlowEnforcementPropertyMask) != 0) && mCetSupported) {
     SmmShadowStackSize = EFI_PAGES_TO_SIZE (EFI_SIZE_TO_PAGES (PcdGet32 (PcdCpuSmmShadowStackSize)));
     if (FeaturePcdGet (PcdCpuSmmStackGuard)) {
       SmmShadowStackSize += EFI_PAGES_TO_SIZE (2);

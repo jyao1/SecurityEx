@@ -731,8 +731,8 @@ PiCpuSmmEntry (
     }
   }
 
-  DEBUG ((DEBUG_INFO, "PcdCpuSmmCetEnable              = %d\n", FeaturePcdGet (PcdCpuSmmCetEnable)));
-  if (FeaturePcdGet (PcdCpuSmmCetEnable)) {
+  DEBUG ((DEBUG_INFO, "PcdControlFlowEnforcementPropertyMask = %d\n", PcdGet32 (PcdControlFlowEnforcementPropertyMask)));
+  if (PcdGet32 (PcdControlFlowEnforcementPropertyMask) != 0) {
     AsmCpuid (CPUID_EXTENDED_FUNCTION, &RegEax, NULL, NULL, NULL);
     if (RegEax > CPUID_EXTENDED_FUNCTION) {
       AsmCpuidEx (CPUID_STRUCTURED_EXTENDED_FEATURE_FLAGS, CPUID_STRUCTURED_EXTENDED_FEATURE_FLAGS_SUB_LEAF_INFO, NULL, NULL, &RegEcx, &RegEdx);
@@ -875,7 +875,7 @@ PiCpuSmmEntry (
   }
 
   mSmmShadowStackSize = 0;
-  if (FeaturePcdGet (PcdCpuSmmCetEnable) && mCetSupported) {
+  if ((PcdGet32 (PcdControlFlowEnforcementPropertyMask) != 0) && mCetSupported) {
     //
     // Append Shadow Stack after normal stack
     //
@@ -902,7 +902,7 @@ PiCpuSmmEntry (
   DEBUG ((DEBUG_INFO, "Stacks                   - 0x%x\n", Stacks));
   DEBUG ((DEBUG_INFO, "mSmmStackSize            - 0x%x\n", mSmmStackSize));
   DEBUG ((DEBUG_INFO, "PcdCpuSmmStackGuard      - 0x%x\n", FeaturePcdGet (PcdCpuSmmStackGuard)));
-  if (FeaturePcdGet (PcdCpuSmmCetEnable) && mCetSupported) {
+  if ((PcdGet32 (PcdControlFlowEnforcementPropertyMask) != 0) && mCetSupported) {
     DEBUG ((DEBUG_INFO, "mSmmShadowStackSize      - 0x%x\n", mSmmShadowStackSize));
   }
 
@@ -945,7 +945,7 @@ PiCpuSmmEntry (
   //
   Cr3 = InitializeMpServiceData (Stacks, mSmmStackSize, mSmmShadowStackSize);
 
-  if (FeaturePcdGet (PcdCpuSmmCetEnable) && mCetSupported) {
+  if ((PcdGet32 (PcdControlFlowEnforcementPropertyMask) != 0) && mCetSupported) {
     for (Index = 0; Index < gSmmCpuPrivate->SmmCoreEntryContext.NumberOfCpus; Index++) {
       SetShadowStack (
         Cr3,
