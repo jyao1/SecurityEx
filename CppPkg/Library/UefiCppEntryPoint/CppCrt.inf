@@ -1,0 +1,53 @@
+## @file
+# Module entry point library for UEFI Application.
+#
+# Copyright (c) 2007 - 2014, Intel Corporation. All rights reserved.<BR>
+#
+#  This program and the accompanying materials
+#  are licensed and made available under the terms and conditions of the BSD License
+#  which accompanies this distribution. The full text of the license may be found at
+#  http://opensource.org/licenses/bsd-license.php.
+#  THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
+#
+#
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = UefiCppCrt
+  FILE_GUID                      = E2D32F74-37AE-4C86-B3D8-643781DEF31D
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = NULL
+  CONSTRUCTOR                    = EfiCRTInit
+  DESTRUCTOR                     = EfiCRTDeinit
+
+#
+#  VALID_ARCHITECTURES           = IA32 X64 IPF EBC
+#
+
+[Sources]
+  new_delete.cpp
+  crt.c        | MSFT
+  ctors.cpp    | GCC
+  crtbegin.cpp | GCC
+  crtend.cpp   | GCC
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  UefiBootServicesTableLib
+  DebugLib
+  MemoryAllocationLib
+
+[Protocols]
+  gEfiLoadedImageProtocolGuid
+
+[BuildOptions]
+  # warning C4804: '/' : unsafe use of type 'bool' in operation
+  # warning C4164: '_ReturnAddress' : intrinsic function not declared
+  MSFT:*_*_*_CC_FLAGS     = /wd4804 /wd4164 /Od /GL-
+  # -Wno-invalid-offsetof -fno-rtti : only for CPP
+  GCC:*_*_*_CC_FLAGS     = -Wno-invalid-offsetof -fno-rtti -fno-exceptions 

@@ -1,0 +1,48 @@
+/* OUTPUT_FORMAT(efi-bsdrv-x86_64) */
+SECTIONS
+{
+  /* . = 0 + SIZEOF_HEADERS; */
+  /*
+   * NOTE: using ". = SIZEOF_HEADERS" can make p_align be 0x1000. sh_align is always 4.
+   * But we can not use this way, because EflConvert will convert ELF to PE image later,
+   * which converts ELF section instead of ELF segment.
+   *
+   * PE section alignment can be 0x20 by default.
+   * If .text is start from 0x1000, then PE section alignment is 0x1000.
+   */
+  . = 0x280;
+  .text ALIGN(0x1000) :
+  {
+    *(.text .stub .text.* .gnu.linkonce.t.*)
+    . = ALIGN(0x20);
+  } =0x90909090
+  .data ALIGN(0x1000) :
+  {
+    *(
+      .rodata .rodata.* .gnu.linkonce.r.*
+      .data .data.* .gnu.linkonce.d.*
+      .bss .bss.*
+      *COM*
+    )
+    /* Add crt dection to support C++ */
+    KEEP (*crtbegin.obj(.ctors))
+    KEEP (*(EXCLUDE_FILE (*crtend.obj) .ctors))
+    KEEP (*(SORT(.ctors.*)))
+    KEEP (*(.ctors))
+    . = ALIGN(0x20);
+  }
+  .eh_frame ALIGN(0x1000) :
+  {
+    KEEP (*(.eh_frame))
+  }
+  .got ALIGN(0x1000) :
+  {
+    *(.got .got.*)
+    . = ALIGN(0x20);
+  }
+  .rela ALIGN(0x1000) :
+  {
+    *(.rela .rela.*)
+  }
+}
+
