@@ -82,15 +82,3 @@ void __fastcall _RTC_CheckStackVars (void *_Esp, _RTC_framedesc *_Fd)
     }
   }
 }
-
-void __cdecl _RTC_Shutdown(void)
-{
-  // dummy
-  return ;
-}
-
-void __cdecl _RTC_InitBase(void)
-{
-  // dummy
-  return ;
-}

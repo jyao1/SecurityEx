@@ -13,25 +13,22 @@
 
 [Defines]
   INF_VERSION                    = 0x00010005
-  BASE_NAME                      = StackCheckLib
-  FILE_GUID                      = AAC7C825-4866-4a27-824C-31E9B1DD3BCF
-  MODULE_TYPE                    = BASE
+  BASE_NAME                      = UninitializedVariableTest
+  FILE_GUID                      = 752EDD2F-ECC0-4585-837C-B65BBD8542A8
+  MODULE_TYPE                    = UEFI_DRIVER
   VERSION_STRING                 = 1.0
-  LIBRARY_CLASS                  = NULL
-  CONSTRUCTOR                    = StackCheckLibConstructor
+  ENTRY_POINT                    = UninitializedVariableTestInitialize
 
 [Sources]
-  GSStub.c             | MSFT
-  RTCStub.c            | MSFT
-  RTCsStub.c           | MSFT
-  RTCcStub.c           | MSFT
-  RTCuStub.c           | MSFT
-  StackProtectorStub.c | GCC
+  UninitializedVariableTest.c
 
 [Packages]
   MdePkg/MdePkg.dec
   
 [LibraryClasses]
-  BaseLib
-  DebugLib
-  RngLib
+  UefiDriverEntryPoint
+
+[BuildOptions]
+  # warning C4700: uninitialized local variable 'Data' used
+  # 4701 and 4703 are already disabled by EDKII.
+  MSFT:*_*_*_CC_FLAGS = /Od /GL- /GS /RTCu

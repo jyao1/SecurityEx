@@ -13,25 +13,21 @@
 
 [Defines]
   INF_VERSION                    = 0x00010005
-  BASE_NAME                      = StackCheckLib
-  FILE_GUID                      = AAC7C825-4866-4a27-824C-31E9B1DD3BCF
-  MODULE_TYPE                    = BASE
+  BASE_NAME                      = StackFrameTest
+  FILE_GUID                      = D447F72A-369D-465E-824B-336E8BB1B1D9
+  MODULE_TYPE                    = UEFI_DRIVER
   VERSION_STRING                 = 1.0
-  LIBRARY_CLASS                  = NULL
-  CONSTRUCTOR                    = StackCheckLibConstructor
+  ENTRY_POINT                    = StackFrameTestInitialize
 
 [Sources]
-  GSStub.c             | MSFT
-  RTCStub.c            | MSFT
-  RTCsStub.c           | MSFT
-  RTCcStub.c           | MSFT
-  RTCuStub.c           | MSFT
-  StackProtectorStub.c | GCC
+  StackFrameTest.c
 
 [Packages]
   MdePkg/MdePkg.dec
   
 [LibraryClasses]
-  BaseLib
-  DebugLib
-  RngLib
+  UefiDriverEntryPoint
+
+[BuildOptions]
+  # warning C4789: buffer 'Buffer' of size 20 bytes will be overrun; 2 bytes will be written starting at offset 20
+  MSFT:*_*_*_CC_FLAGS = /Od /GL- /RTCs

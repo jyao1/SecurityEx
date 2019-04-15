@@ -13,25 +13,21 @@
 
 [Defines]
   INF_VERSION                    = 0x00010005
-  BASE_NAME                      = StackCheckLib
-  FILE_GUID                      = AAC7C825-4866-4a27-824C-31E9B1DD3BCF
-  MODULE_TYPE                    = BASE
+  BASE_NAME                      = SmallTypeTest
+  FILE_GUID                      = D447F72A-369D-465E-824B-336E8BB1B1D9
+  MODULE_TYPE                    = UEFI_DRIVER
   VERSION_STRING                 = 1.0
-  LIBRARY_CLASS                  = NULL
-  CONSTRUCTOR                    = StackCheckLibConstructor
+  ENTRY_POINT                    = SmallTypeTestInitialize
 
 [Sources]
-  GSStub.c             | MSFT
-  RTCStub.c            | MSFT
-  RTCsStub.c           | MSFT
-  RTCcStub.c           | MSFT
-  RTCuStub.c           | MSFT
-  StackProtectorStub.c | GCC
+  SmallTypeTest.c
 
 [Packages]
   MdePkg/MdePkg.dec
   
 [LibraryClasses]
-  BaseLib
-  DebugLib
-  RngLib
+  UefiDriverEntryPoint
+
+[BuildOptions]
+  # warning C4244: '=': conversion from 'UINTN' to 'UINT8', possible loss of data
+  MSFT:*_*_*_CC_FLAGS = /Od /GL- /RTCc

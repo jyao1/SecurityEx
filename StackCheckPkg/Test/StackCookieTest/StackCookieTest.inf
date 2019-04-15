@@ -29,5 +29,5 @@
   UefiDriverEntryPoint
 
 [BuildOptions]
-  MSFT:*_*_*_CC_FLAGS = /Od /GL- /GS /RTCs
+  MSFT:*_*_*_CC_FLAGS = /Od /GL- /GS
   GCC:*_*_*_CC_FLAGS = -O0 -fstack-protector-strong
