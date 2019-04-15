@@ -195,3 +195,13 @@
   ControlFlowPkg/DxeCet/Override/MdeModulePkg/Core/DxeIplPeim/DxeIpl.inf
   ControlFlowPkg/DxeCet/Override/IntelFsp2WrapperPkg/Library/BaseFspWrapperApiLib/BaseFspWrapperApiLib.inf
   ControlFlowPkg/DxeCet/Override/UefiCpuPkg/CpuDxe/CpuDxe.inf
+
+  # CFG
+  ControlFlowPkg/CfgTest/CfgTest/CfgTest.inf {
+  <LibraryClasses>
+    NULL|ControlFlowPkg/Library/CfgStubLib/CfgStubLib.inf
+  <BuildOptions>
+    MSFT:DEBUG_*_*_DLINK_FLAGS = /EXPORT:InitializeDriver=$(IMAGE_ENTRY_POINT) /BASE:0x10000 /ALIGN:4096 /FILEALIGN:4096 /SUBSYSTEM:CONSOLE
+    MSFT:NOOPT_*_*_DLINK_FLAGS = /EXPORT:InitializeDriver=$(IMAGE_ENTRY_POINT) /BASE:0x10000 /ALIGN:4096 /FILEALIGN:4096 /SUBSYSTEM:CONSOLE
+    MSFT:RELEASE_*_*_DLINK_FLAGS = /ALIGN:4096 /FILEALIGN:4096
+  }
