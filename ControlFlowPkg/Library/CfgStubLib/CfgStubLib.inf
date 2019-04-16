@@ -22,6 +22,7 @@
 
 [Sources]
   CfgStub.c             | MSFT
+  UefiImage.c
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -29,6 +30,9 @@
 [LibraryClasses]
   BaseLib
   
+[Protocols]
+  gEfiLoadedImageProtocolGuid
+
 [BuildOptions]
   # warning C4054: 'type cast': from function pointer 'void (__fastcall *)(UINTN)' to data pointer 'void *'
   MSFT:*_*_*_CC_FLAGS = /Od /GL- /wd4054

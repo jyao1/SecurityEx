@@ -29,15 +29,7 @@ _my_guard_check_icall (
     IN UINTN Target
     )
 {
-}
-
-RETURN_STATUS
-EFIAPI
-CfgLibConstructor(
-  VOID
-  )
-{
-  return RETURN_SUCCESS;
+  DEBUG ((DEBUG_INFO, "_my_guard_check_icall - 0x%08x\n", Target));
 }
 
 #pragma section(".00cfg", read)
