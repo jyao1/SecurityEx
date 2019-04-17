@@ -17,14 +17,13 @@ This package is to demonstrate Address Space Layout Randomization (ASLR).
 This package is to demonstrate how to detect stack overflow, heap overflow, NULL pointer reference.
 
 2.1) Stack overflow detection.
-  OverflowDetectionPkg\StackGuard.
+  This is merged into EDKII.
 
 2.2) Heap overflow detection.
-  OverflowDetectionPkg\Override\MdeModulePkg\Core\Dxe.
-  OverflowDetectionPkg\Override\MdeModulePkg\Core\PiSmmCore.
+  This is merged into EDKII.
 
 2.3) NULL pointer reference.
-  OverflowDetectionPkg\NullPointerProtection.
+  This is merged into EDKII.
 
 2.4) Unit Test.
   OverflowDetectionPkg\Test\HeapOverflow.
@@ -32,15 +31,41 @@ This package is to demonstrate how to detect stack overflow, heap overflow, NULL
 
 3) StackCheckPkg
 
-This package is to demonstrate how to use compiler option to check stack.
+This package is to demonstrate how to use compiler option for runtime stack.
 
-3.1) Using Microsoft Visual Studio: /GS /RTcs, and GCC: -fstack-protector-strong.
+3.1) Using Microsoft Visual Studio: /GS /RTCs /RTCc /RTCu, and GCC: -fstack-protector-strong.
   StackCheckPkg\Library\StackCheckLib.
 
 3.2) Unit Test.
-  StackCheckPkg\Test\StackCookieTest.
+  StackCheckPkg\Test\SmallTypeTest             - Test /RTCc and -fstack-protector-strong
+  StackCheckPkg\Test\StackCookieTest           - Test /GS
+  StackCheckPkg\Test\StackFrameTest            - Test /RTCs
+  StackCheckPkg\Test\UninitializedVariableTest - Test /RTCu
 
-For more detail, please refer to https://github.com/tianocore-docs/Docs/raw/master/White_Papers/A_Tour_Beyond_BIOS_Securiy_Enhancement_to_Mitigate_Buffer_Overflow_in_UEFI.pdf
+For more detail, please refer to https://www.gitbook.com/book/edk2-docs/a-tour-beyond-bios-mitigate-buffer-overflow-in-ue/details
+
+4) ControlFlowPkg
+
+This package is to demonstrate Control Flow Enforcement.
+
+4.1) Using Intel CET-ShadowStack in SMM
+  This is merged into EDKII.
+
+4.2) Using Intel CET-ShadowStack in DXE
+  ControlFlowPkg\DxeCet
+
+4.3) Using Intel CET-IBT
+  ControlFlowPkg\Ibt
+
+4.4) Using Microsoft Visual Studio: /guard:cf
+  ControlFlowPkg\Library\CfgStubLib
+
+4.5) Unit Test
+  ControlFlowPkg\Test\ShadowStackTest
+  ControlFlowPkg\Test\IndirectBranchTrackingTest
+  ControlFlowPkg\CfgTest\CfgTest
+
+For CET in SMM, please refer to https://github.com/tianocore/tianocore.github.io/wiki/CET-in-SMM 
 
 ## Known limitation:
 This package is only the sample code to show the concept.
