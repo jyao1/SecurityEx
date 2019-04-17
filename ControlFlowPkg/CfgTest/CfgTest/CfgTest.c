@@ -27,10 +27,7 @@ VOID
 EFIAPI
 ExternFunc (
   VOID
-  )
-{
-}
-
+  );
 
 VOID
 EFIAPI
@@ -40,8 +37,10 @@ CfgTest (
 {
   EXTERNAL_FUNC Func;
 
-  Func = ExternFunc;
+  Func = (EXTERNAL_FUNC)((UINTN)ExternFunc);
+  Func ();
 
+  Func = (EXTERNAL_FUNC)((UINTN)ExternFunc + 1);
   Func ();
 }
 

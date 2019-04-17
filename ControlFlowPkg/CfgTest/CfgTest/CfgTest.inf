@@ -22,6 +22,12 @@
 [Sources]
   CfgTest.c
 
+[Sources.Ia32]
+  Ia32/ExternFunc.nasm
+
+[Sources.X64]
+  X64/ExternFunc.nasm
+
 [Packages]
   MdePkg/MdePkg.dec
 
