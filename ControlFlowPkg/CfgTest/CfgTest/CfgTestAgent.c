@@ -18,17 +18,9 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/UefiBootServicesTableLib.h>
 #include "CfgTest.h"
 
-VOID
-EFIAPI
-ExternFunc (
-  VOID
-  );
-
 EFI_GUID gCfgTestProtocolGuid = CFG_TEST_PROTOCOL_GUID;
 
-CFG_TEST_PROTOCOL  mCfgTestProtocol = {
-  ExternFunc
-};
+CFG_TEST_PROTOCOL  *mCfgTestProtocol;
 
 VOID
 EFIAPI
@@ -38,32 +30,32 @@ CfgTest (
 {
   EXTERNAL_FUNC Func;
 
-  Func = (EXTERNAL_FUNC)((UINTN)ExternFunc);
+  Func = (EXTERNAL_FUNC)((UINTN)mCfgTestProtocol->ExternFunc);
   Func ();
 
-  //Func = (EXTERNAL_FUNC)((UINTN)ExternFunc + 1);
-  //Func ();
+  Func = (EXTERNAL_FUNC)((UINTN)mCfgTestProtocol->ExternFunc + 1);
+  Func ();
 }
 
 EFI_STATUS
 EFIAPI
-CfgTestInitialize(
+CfgTestAgentInitialize(
   IN EFI_HANDLE         ImageHandle,
   IN EFI_SYSTEM_TABLE   *SystemTable
   )
 {
-  EFI_STATUS  Status;
-  EFI_HANDLE  Handle;
+  EFI_STATUS   Status;
 
-  CfgTest ();
-
-  Handle = NULL;
-  Status = gBS->InstallProtocolInterface (
-                  &Handle,
+  Status = gBS->LocateProtocol (
                   &gCfgTestProtocolGuid,
-                  EFI_NATIVE_INTERFACE,
+                  NULL,
                   &mCfgTestProtocol
                   );
+  if (EFI_ERROR(Status)) {
+    return Status;
+  }
+
+  CfgTest ();
 
   return EFI_SUCCESS;
 }

@@ -13,16 +13,21 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 **/
 
 #include <Uefi.h>
+#include <Library/BaseLib.h>
 #include <Library/UefiApplicationEntryPoint.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/DebugLib.h>
 #include <Library/PeCoffLib.h>
 #include <Protocol/LoadedImage.h>
 #include "PeLoadConfiguration.h"
+#include "CfgProtocol.h"
 
-UINT32 *gGuardCFFunctionTable;
-UINTN  gGuardCFFunctionCount;
-UINTN  gImageBase;
+EFI_GUID gCfgProtocolGuid = CFG_PROTOCOL_GUID;
+
+CFG_NODE mCfgNode;
+CFG_PROTOCOL *mCfgProtocol;
+
+CFG_PROTOCOL mLocalCfgProtocol;
 
 RETURN_STATUS
 EFIAPI
@@ -31,6 +36,7 @@ UefiCfgLibConstructor(
   )
 {
   EFI_LOADED_IMAGE_PROTOCOL            *LoadedImage;
+  EFI_HANDLE                           Handle;
   EFI_STATUS                           Status;
   VOID                                 *ImageAddress;
   EFI_IMAGE_DOS_HEADER                 *DosHdr;
@@ -74,7 +80,9 @@ UefiCfgLibConstructor(
   DEBUG ((DEBUG_INFO, "AddressOfEntryPoint - 0x%08x\n", AddressOfEntryPoint));
   
   Offset = (UINTN)_ModuleEntryPoint - (AddressOfEntryPoint + (UINTN)ImageAddress);
-  gImageBase = (UINTN)ImageAddress + Offset;
+  InitializeListHead (&mCfgNode.Link);
+  mCfgNode.ImageBase = (UINTN)ImageAddress + Offset;
+  mCfgNode.ImageSize = (UINTN)LoadedImage->ImageSize;
   
   //
   // Get the magic value from the PE/COFF Optional Header
@@ -163,10 +171,10 @@ UefiCfgLibConstructor(
     DEBUG ((DEBUG_INFO, "\n  Guard CF Function Table\n"));
     DEBUG ((DEBUG_INFO, "    Address\n"));
     DEBUG ((DEBUG_INFO, "    =======\n"));
-    gGuardCFFunctionTable = (VOID *)(UINTN)LoadConfig.Entry32->GuardCFFunctionTable;
-    gGuardCFFunctionCount = LoadConfig.Entry32->GuardCFFunctionCount;
-    for (Index = 0; Index < gGuardCFFunctionCount; Index++) {
-      DEBUG ((DEBUG_INFO, "    0x%08x | 0x%08x\n", gGuardCFFunctionTable[Index], gGuardCFFunctionTable[Index] + gImageBase));
+    mCfgNode.GuardCFFunctionTable = (VOID *)(UINTN)LoadConfig.Entry32->GuardCFFunctionTable;
+    mCfgNode.GuardCFFunctionCount = LoadConfig.Entry32->GuardCFFunctionCount;
+    for (Index = 0; Index < mCfgNode.GuardCFFunctionCount; Index++) {
+      DEBUG ((DEBUG_INFO, "    0x%08x | 0x%08x\n", mCfgNode.GuardCFFunctionTable[Index], mCfgNode.GuardCFFunctionTable[Index] + mCfgNode.ImageBase));
     }
   } else {
     Size = LoadConfig.Entry64->Characteristics;
@@ -239,12 +247,33 @@ UefiCfgLibConstructor(
     DEBUG ((DEBUG_INFO, "\n  Guard CF Function Table\n"));
     DEBUG ((DEBUG_INFO, "    Address\n"));
     DEBUG ((DEBUG_INFO, "    =======\n"));
-    gGuardCFFunctionTable = (VOID *)(UINTN)LoadConfig.Entry64->GuardCFFunctionTable;
-    gGuardCFFunctionCount = (UINTN)LoadConfig.Entry64->GuardCFFunctionCount;
-    for (Index = 0; Index < gGuardCFFunctionCount; Index++) {
-      DEBUG ((DEBUG_INFO, "    0x%08x | 0x%016lx\n", gGuardCFFunctionTable[Index], gGuardCFFunctionTable[Index] + gImageBase));
+    mCfgNode.GuardCFFunctionTable = (VOID *)(UINTN)LoadConfig.Entry64->GuardCFFunctionTable;
+    mCfgNode.GuardCFFunctionCount = (UINTN)LoadConfig.Entry64->GuardCFFunctionCount;
+    for (Index = 0; Index < mCfgNode.GuardCFFunctionCount; Index++) {
+      DEBUG ((DEBUG_INFO, "    0x%08x | 0x%016lx\n", mCfgNode.GuardCFFunctionTable[Index], mCfgNode.GuardCFFunctionTable[Index] + mCfgNode.ImageBase));
     }
   }
+
+  Status = gBS->LocateProtocol (
+                  &gCfgProtocolGuid,
+                  NULL,
+                  &mCfgProtocol
+                  );
+  if (!EFI_ERROR(Status)) {
+    InsertTailList (&mCfgProtocol->CfgNode, &mCfgNode.Link);
+    goto Finish;
+  }
+  
+  InitializeListHead (&mLocalCfgProtocol.CfgNode);
+  InsertTailList (&mLocalCfgProtocol.CfgNode, &mCfgNode.Link);
+  Handle = NULL;
+  Status = gBS->InstallProtocolInterface (
+                  &Handle,
+                  &gCfgProtocolGuid,
+                  EFI_NATIVE_INTERFACE,
+                  &mLocalCfgProtocol
+                  );
+  mCfgProtocol = &mLocalCfgProtocol;
 
 Finish:
   return RETURN_SUCCESS;

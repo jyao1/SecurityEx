@@ -19,6 +19,7 @@
   VERSION_STRING                 = 1.0
   LIBRARY_CLASS                  = NULL
   CONSTRUCTOR                    = CfgLibConstructor
+  DESTRUCTOR                     = CfgLibDestructor
 
 [Sources]
   CfgStub.c            | MSFT

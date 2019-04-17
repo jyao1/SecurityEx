@@ -13,20 +13,14 @@
 
 [Defines]
   INF_VERSION                    = 0x00010005
-  BASE_NAME                      = CfgTest
-  FILE_GUID                      = 9822E519-85C2-4EEA-AB79-B665842A6C8F
+  BASE_NAME                      = CfgTestAgent
+  FILE_GUID                      = FFDC78B1-A28F-4DD4-84A9-89222D97269C
   MODULE_TYPE                    = UEFI_DRIVER
   VERSION_STRING                 = 1.0
-  ENTRY_POINT                    = CfgTestInitialize
+  ENTRY_POINT                    = CfgTestAgentInitialize
 
 [Sources]
-  CfgTest.c
-
-[Sources.Ia32]
-  Ia32/ExternFunc.nasm
-
-[Sources.X64]
-  X64/ExternFunc.nasm
+  CfgTestAgent.c
 
 [Packages]
   MdePkg/MdePkg.dec
