@@ -20,9 +20,13 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Protocol/LoadedImage.h>
 #include "PeLoadConfiguration.h"
 
+UINT32 *gGuardCFFunctionTable;
+UINTN  gGuardCFFunctionCount;
+UINTN  gImageBase;
+
 RETURN_STATUS
 EFIAPI
-CfgLibConstructor(
+UefiCfgLibConstructor(
   VOID
   )
 {
@@ -31,10 +35,8 @@ CfgLibConstructor(
   VOID                                 *ImageAddress;
   EFI_IMAGE_DOS_HEADER                 *DosHdr;
   UINT32                               PeCoffHeaderOffset;
-  EFI_IMAGE_SECTION_HEADER             *Section;
   EFI_IMAGE_OPTIONAL_HEADER_PTR_UNION  Hdr;
   UINT16                               Magic;
-  UINT8                                *Name;
   UINTN                                Index;
   UINTN                                AddressOfEntryPoint;
   UINT64                               ImageBase;
@@ -42,8 +44,6 @@ CfgLibConstructor(
   UINTN                                Offset;
   EFI_IMAGE_LOAD_CONFIGURATION_ENTRY_PTR_UNION  LoadConfig;
   UINT32                               Size;
-  UINT32                               *FuncTable32;
-  UINT64                               *FuncTable64;
 
   Status = gBS->HandleProtocol (
                   gImageHandle,
@@ -74,6 +74,7 @@ CfgLibConstructor(
   DEBUG ((DEBUG_INFO, "AddressOfEntryPoint - 0x%08x\n", AddressOfEntryPoint));
   
   Offset = (UINTN)_ModuleEntryPoint - (AddressOfEntryPoint + (UINTN)ImageAddress);
+  gImageBase = (UINTN)ImageAddress + Offset;
   
   //
   // Get the magic value from the PE/COFF Optional Header
@@ -162,9 +163,10 @@ CfgLibConstructor(
     DEBUG ((DEBUG_INFO, "\n  Guard CF Function Table\n"));
     DEBUG ((DEBUG_INFO, "    Address\n"));
     DEBUG ((DEBUG_INFO, "    =======\n"));
-    FuncTable32 = (VOID *)(UINTN)LoadConfig.Entry32->GuardCFFunctionTable;
-    for (Index = 0; Index < LoadConfig.Entry32->GuardCFFunctionCount; Index++) {
-      DEBUG ((DEBUG_INFO, "    0x%08x | 0x%08x\n", FuncTable32[Index], FuncTable32[Index] + ImageBase));
+    gGuardCFFunctionTable = (VOID *)(UINTN)LoadConfig.Entry32->GuardCFFunctionTable;
+    gGuardCFFunctionCount = LoadConfig.Entry32->GuardCFFunctionCount;
+    for (Index = 0; Index < gGuardCFFunctionCount; Index++) {
+      DEBUG ((DEBUG_INFO, "    0x%08x | 0x%08x\n", gGuardCFFunctionTable[Index], gGuardCFFunctionTable[Index] + gImageBase));
     }
   } else {
     Size = LoadConfig.Entry64->Characteristics;
@@ -237,33 +239,11 @@ CfgLibConstructor(
     DEBUG ((DEBUG_INFO, "\n  Guard CF Function Table\n"));
     DEBUG ((DEBUG_INFO, "    Address\n"));
     DEBUG ((DEBUG_INFO, "    =======\n"));
-    FuncTable64 = (VOID *)(UINTN)LoadConfig.Entry64->GuardCFFunctionTable;
-    for (Index = 0; Index < LoadConfig.Entry64->GuardCFFunctionCount; Index++) {
-      DEBUG ((DEBUG_INFO, "    0x%016lx | 0x%016lx\n", FuncTable64[Index], FuncTable64[Index] + ImageBase));
+    gGuardCFFunctionTable = (VOID *)(UINTN)LoadConfig.Entry64->GuardCFFunctionTable;
+    gGuardCFFunctionCount = (UINTN)LoadConfig.Entry64->GuardCFFunctionCount;
+    for (Index = 0; Index < gGuardCFFunctionCount; Index++) {
+      DEBUG ((DEBUG_INFO, "    0x%08x | 0x%016lx\n", gGuardCFFunctionTable[Index], gGuardCFFunctionTable[Index] + gImageBase));
     }
-  }
-
-  Section = (EFI_IMAGE_SECTION_HEADER *) (
-               (UINT8 *) (UINTN) ImageAddress +
-               PeCoffHeaderOffset +
-               sizeof(UINT32) +
-               sizeof(EFI_IMAGE_FILE_HEADER) +
-               Hdr.Pe32->FileHeader.SizeOfOptionalHeader
-               );
-  for (Index = 0; Index < Hdr.Pe32->FileHeader.NumberOfSections; Index++) {
-    Name = Section[Index].Name;
-    DEBUG ((
-      DEBUG_INFO,
-      "Section - '%c%c%c%c%c%c%c%c'\n",
-      Name[0],
-      Name[1],
-      Name[2],
-      Name[3],
-      Name[4],
-      Name[5],
-      Name[6],
-      Name[7]
-      ));
   }
 
 Finish:

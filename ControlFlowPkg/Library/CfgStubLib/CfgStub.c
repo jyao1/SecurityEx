@@ -23,17 +23,75 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 // Below data structure is from guard_support.c (Microsoft Visual Studio)
 //
 
+//#pragma section(".00cfg", read)
+
+//__declspec(allocate(".00cfg"))
+//__declspec(selectany)
+//volatile void * __guard_check_icall_fptr = (void *)_my_guard_check_icall;
+
+extern void * __guard_check_icall_fptr;
+
+extern UINT32 *gGuardCFFunctionTable;
+extern UINTN  gGuardCFFunctionCount;
+extern UINTN  gImageBase;
+
 void
 __fastcall
 _my_guard_check_icall (
     IN UINTN Target
     )
 {
-  DEBUG ((DEBUG_INFO, "_my_guard_check_icall - 0x%08x\n", Target));
+  UINTN  Index;
+
+  DEBUG ((DEBUG_INFO, "_my_guard_check_icall - 0x%016lx\n", (UINT64)Target));
+  for (Index = 0; Index < gGuardCFFunctionCount; Index++) {
+    DEBUG ((DEBUG_INFO, "Checking ... 0x%016lx\n", gGuardCFFunctionTable[Index] + gImageBase));
+    if ((gGuardCFFunctionTable[Index] + gImageBase) == Target) {
+      DEBUG ((DEBUG_INFO, "\n!!! guard check pass !!!\n"));
+      return;
+    }
+  }
+  DEBUG ((DEBUG_ERROR, "\n!!! guard check fail !!!\n"));
+  ASSERT (FALSE);
+
+  CpuDeadLoop();
 }
 
-#pragma section(".00cfg", read)
+RETURN_STATUS
+EFIAPI
+UefiCfgLibConstructor(
+  VOID
+  );
 
-__declspec(allocate(".00cfg"))
-__declspec(selectany)
-volatile void * __guard_check_icall_fptr = (void *)_my_guard_check_icall;
+VOID
+EFIAPI
+EnableReadOnlyProtection (
+  IN VOID  *Buffer,
+  IN UINTN Size
+  );
+
+VOID
+EFIAPI
+DisableReadOnlyProtection (
+  IN VOID  *Buffer,
+  IN UINTN Size
+  );
+
+RETURN_STATUS
+EFIAPI
+CfgLibConstructor(
+  VOID
+  )
+{
+  UefiCfgLibConstructor ();
+
+#ifdef WINNT
+  DisableReadOnlyProtection (&__guard_check_icall_fptr, sizeof(__guard_check_icall_fptr));
+#endif
+  __guard_check_icall_fptr = (void *)_my_guard_check_icall;
+#ifdef WINNT
+  EnableReadOnlyProtection (&__guard_check_icall_fptr, sizeof(__guard_check_icall_fptr));
+#endif
+
+  return RETURN_SUCCESS;
+}

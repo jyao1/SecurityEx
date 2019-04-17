@@ -21,18 +21,20 @@
   CONSTRUCTOR                    = CfgLibConstructor
 
 [Sources]
-  CfgStub.c             | MSFT
+  CfgStub.c            | MSFT
   UefiImage.c
+  WinNTServiceLibMsvc.c   | MSFT # only for NT32
 
 [Packages]
   MdePkg/MdePkg.dec
   
 [LibraryClasses]
   BaseLib
+  UefiBootServicesTableLib
   
 [Protocols]
   gEfiLoadedImageProtocolGuid
 
 [BuildOptions]
   # warning C4054: 'type cast': from function pointer 'void (__fastcall *)(UINTN)' to data pointer 'void *'
-  MSFT:*_*_*_CC_FLAGS = /Od /GL- /wd4054
+  MSFT:*_*_*_CC_FLAGS = /Od /GL- /wd4054 /DWINNT
