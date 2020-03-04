@@ -70,12 +70,11 @@
   #
   # Misc
   #
-  DebugLib|IntelFrameworkModulePkg/Library/PeiDxeDebugLibReportStatusCode/PeiDxeDebugLibReportStatusCode.inf
+  DebugLib|MdeModulePkg/Library/PeiDxeDebugLibReportStatusCode/PeiDxeDebugLibReportStatusCode.inf
   DebugPrintErrorLevelLib|MdePkg/Library/BaseDebugPrintErrorLevelLib/BaseDebugPrintErrorLevelLib.inf  
   ReportStatusCodeLib|MdeModulePkg/Library/DxeReportStatusCodeLib/DxeReportStatusCodeLib.inf
   PerformanceLib|MdePkg/Library/BasePerformanceLibNull/BasePerformanceLibNull.inf
   DebugAgentLib|MdeModulePkg/Library/DebugAgentLibNull/DebugAgentLibNull.inf
-  UefiDecompressLib|IntelFrameworkModulePkg/Library/BaseUefiTianoCustomDecompressLib/BaseUefiTianoCustomDecompressLib.inf
   
   #
   # CPU
@@ -187,10 +186,12 @@
     <LibraryClasses>
       NULL|StackCheckPkg/Library/StackCheckLib/StackCheckLib.inf
   }
-  StackCheckPkg/Test/UninitializedVariableTest/UninitializedVariableTest.inf {
-    <LibraryClasses>
-      NULL|StackCheckPkg/Library/StackCheckLib/StackCheckLib.inf
-  }
+
+  # build error with CLANG [-Werror,-Wsometimes-uninitialized]
+  #StackCheckPkg/Test/UninitializedVariableTest/UninitializedVariableTest.inf {
+  #  <LibraryClasses>
+  #    NULL|StackCheckPkg/Library/StackCheckLib/StackCheckLib.inf
+  #}
 
 [BuildOptions]
   MSFT:DEBUG_*_*_DLINK_FLAGS = /EXPORT:InitializeDriver=$(IMAGE_ENTRY_POINT) /BASE:0x10000 /ALIGN:4096 /FILEALIGN:4096 /SUBSYSTEM:CONSOLE
