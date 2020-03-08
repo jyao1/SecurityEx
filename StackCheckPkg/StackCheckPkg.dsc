@@ -186,12 +186,10 @@
     <LibraryClasses>
       NULL|StackCheckPkg/Library/StackCheckLib/StackCheckLib.inf
   }
-
-  # build error with CLANG [-Werror,-Wsometimes-uninitialized]
-  #StackCheckPkg/Test/UninitializedVariableTest/UninitializedVariableTest.inf {
-  #  <LibraryClasses>
-  #    NULL|StackCheckPkg/Library/StackCheckLib/StackCheckLib.inf
-  #}
+  StackCheckPkg/Test/UninitializedVariableTest/UninitializedVariableTest.inf {
+    <LibraryClasses>
+      NULL|StackCheckPkg/Library/StackCheckLib/StackCheckLib.inf
+  }
     
   StackCheckPkg/Test/SideChannelTest/SideChannelTest.inf
 

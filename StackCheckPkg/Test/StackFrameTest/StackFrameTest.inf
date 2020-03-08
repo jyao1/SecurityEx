@@ -31,3 +31,4 @@
 [BuildOptions]
   # warning C4789: buffer 'Buffer' of size 20 bytes will be overrun; 2 bytes will be written starting at offset 20
   MSFT:*_*_*_CC_FLAGS = /Od /GL- /RTCs
+  GCC:*_CLANGPDB_*_CC_FLAGS = -O0 -fsanitize=address

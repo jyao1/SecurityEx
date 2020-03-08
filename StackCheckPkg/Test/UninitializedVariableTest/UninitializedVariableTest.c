@@ -17,6 +17,12 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/DebugLib.h>
 #include <Library/BaseMemoryLib.h>
 
+#if defined(_MSC_EXTENSIONS)
+//#pragma warning ( once : 4701 )
+//#pragma warning ( once : 4703 )
+#endif
+
+
 UINTN
 TestA (
   UINTN Index

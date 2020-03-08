@@ -20,9 +20,9 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 // Below data structure is from rtcapi.h (Microsoft Visual Studio)
 //
 
-void   __cdecl     _RTC_UninitUse(const char *_Varname)
+void   __cdecl     _RTC_UninitUse(const char *VarName)
 {
-  DEBUG ((EFI_D_ERROR, "\n!!! unitialized var \"%a\" is used!!!\n", _Varname));
+  DEBUG ((EFI_D_ERROR, "\n!!! uninitialized var \"%a\" is used!!!\n", VarName));
   ASSERT (FALSE);
 
   CpuDeadLoop();

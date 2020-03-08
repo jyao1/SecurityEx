@@ -31,3 +31,4 @@
 [BuildOptions]
   # warning C4244: '=': conversion from 'UINTN' to 'UINT8', possible loss of data
   MSFT:*_*_*_CC_FLAGS = /Od /GL- /RTCc
+  GCC:*_CLANGPDB_*_CC_FLAGS = -O0 -fsanitize=undefined

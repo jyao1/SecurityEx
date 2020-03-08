@@ -27,6 +27,8 @@
   RTCcStub.c           | MSFT
   RTCuStub.c           | MSFT
   StackProtectorStub.c | GCC
+  ASanStub.c           | GCC
+  UBSanStub.c          | GCC
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -35,3 +37,7 @@
   BaseLib
   DebugLib
   RngLib
+
+[BuildOptions]
+  MSFT:*_*_*_CC_FLAGS = /Od /GL-
+  GCC:*_*_*_CC_FLAGS = -O0

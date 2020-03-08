@@ -32,4 +32,4 @@
   # /Qspectre-load
   # /Qspectre-load-cf  
   MSFT:*_*_*_CC_FLAGS = /GL- /Qspectre 
-  GCC:*_*_*_CC_FLAGS = -O0 -mspeculative-load-hardening
+  GCC:*_CLANGPDB_*_CC_FLAGS = -O0 -mspeculative-load-hardening

@@ -30,5 +30,7 @@
 
 [BuildOptions]
   # warning C4700: uninitialized local variable 'Data' used
-  # 4701 and 4703 are already disabled by EDKII.
+  # 4701 and 4703 are already disabled by EDKII. Need enable in the code to detect at build time.
   MSFT:*_*_*_CC_FLAGS = /Od /GL- /GS /RTCu
+  # MSan does not support windows platform
+  GCC:*_CLANGPDB_*_CC_FLAGS = -O0 -Wno-sometimes-uninitialized # -fsanitize=memory 

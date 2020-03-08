@@ -39,6 +39,16 @@ TestA (
   return Data8;
 }
 
+INT32
+TestB (
+  INT32  Test
+  )
+{
+  INT32 Data = 0x7fffffff;
+  Data += Test;
+  return Data;
+}
+
 EFI_STATUS
 EFIAPI
 SmallTypeTestInitialize (
@@ -47,6 +57,8 @@ SmallTypeTestInitialize (
   )
 {
   TestA ();
+
+  TestB (3);
 
   return EFI_SUCCESS;
 }

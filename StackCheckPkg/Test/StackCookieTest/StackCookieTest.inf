@@ -30,4 +30,4 @@
 
 [BuildOptions]
   MSFT:*_*_*_CC_FLAGS = /Od /GL- /GS
-  GCC:*_*_*_CC_FLAGS = -O0 -fstack-protector-strong
+  GCC:*_GCC5_*_CC_FLAGS = -O0 -fstack-protector-strong
