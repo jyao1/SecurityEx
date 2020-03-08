@@ -33,13 +33,16 @@ This package is to demonstrate how to detect stack overflow, heap overflow, NULL
 
 This package is to demonstrate how to use compiler option for runtime stack.
 
-3.1) Using Microsoft Visual Studio: /GS /RTCs /RTCc /RTCu, and GCC: -fstack-protector-strong.
+3.1) Using Microsoft Visual Studio: /GS /RTCs /RTCc /RTCu, GCC: -fstack-protector-strong, Clang: -fsanitize=address -fsanitize=undefined.
   StackCheckPkg\Library\StackCheckLib.
 
+  Clang: -fsanitize=memory cannot be enabled because it does not support windows platform.
+
 3.2) Unit Test.
-  StackCheckPkg\Test\SmallTypeTest             - Test /RTCc and -fstack-protector-strong
-  StackCheckPkg\Test\StackCookieTest           - Test /GS
-  StackCheckPkg\Test\StackFrameTest            - Test /RTCs
+
+  StackCheckPkg\Test\SmallTypeTest             - Test /RTCc and -fsanitize=undefined
+  StackCheckPkg\Test\StackCookieTest           - Test /GS   and -fstack-protector-strong
+  StackCheckPkg\Test\StackFrameTest            - Test /RTCs and -fsanitize=address
   StackCheckPkg\Test\UninitializedVariableTest - Test /RTCu
 
 For more detail, please refer to https://www.gitbook.com/book/edk2-docs/a-tour-beyond-bios-mitigate-buffer-overflow-in-ue/details
@@ -57,13 +60,13 @@ This package is to demonstrate Control Flow Enforcement.
 4.3) Using Intel CET-IBT
   ControlFlowPkg\Ibt
 
-4.4) Using Microsoft Visual Studio: /guard:cf
+4.4) Using Microsoft Visual Studio: /guard:cf, and Clang: -fsanitize=cfi
   ControlFlowPkg\Library\CfgStubLib
 
 4.5) Unit Test
   ControlFlowPkg\Test\ShadowStackTest
   ControlFlowPkg\Test\IndirectBranchTrackingTest
-  ControlFlowPkg\CfgTest\CfgTest
+  ControlFlowPkg\CfgTest\CfgTest               - Test /guard:cf and -fsanitize=cfi
 
 For CET in SMM, please refer to https://github.com/tianocore/tianocore.github.io/wiki/CET-in-SMM 
 
