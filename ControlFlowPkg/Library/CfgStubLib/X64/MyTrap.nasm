@@ -10,14 +10,12 @@
 ;
 ;-------------------------------------------------------------------------------
 
+DEFAULT REL
 SECTION .text
-    
-global ASM_PFX(ExternFunc)
-ASM_PFX(ExternFunc):
-  nop
-  ret
 
-global ASM_PFX(ExternFunc2)
-ASM_PFX(ExternFunc2):
-  nop
+;extern ASM_PFX(MyTrapFunc)
+
+global ASM_PFX(MyTrap)
+ASM_PFX(MyTrap):
+  jmp ASM_PFX(MyTrap)
   ret

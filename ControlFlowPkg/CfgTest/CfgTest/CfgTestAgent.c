@@ -49,7 +49,7 @@ CfgTestAgentInitialize(
   Status = gBS->LocateProtocol (
                   &gCfgTestProtocolGuid,
                   NULL,
-                  &mCfgTestProtocol
+                  (VOID *)&mCfgTestProtocol
                   );
   if (EFI_ERROR(Status)) {
     return Status;

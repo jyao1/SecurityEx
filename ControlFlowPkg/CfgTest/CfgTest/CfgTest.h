@@ -25,6 +25,7 @@ VOID
 
 typedef struct {
   EXTERNAL_FUNC   ExternFunc;
+  EXTERNAL_FUNC   ExternFunc2;
 } CFG_TEST_PROTOCOL;
 
 extern EFI_GUID gCfgTestProtocolGuid;

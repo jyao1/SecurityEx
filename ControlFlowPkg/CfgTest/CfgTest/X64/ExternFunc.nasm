@@ -17,3 +17,8 @@ global ASM_PFX(ExternFunc)
 ASM_PFX(ExternFunc):
   nop
   ret
+
+global ASM_PFX(ExternFunc2)
+ASM_PFX(ExternFunc2):
+  nop
+  ret

@@ -24,10 +24,17 @@ ExternFunc (
   VOID
   );
 
+VOID
+EFIAPI
+ExternFunc2 (
+  VOID
+  );
+
 EFI_GUID gCfgTestProtocolGuid = CFG_TEST_PROTOCOL_GUID;
 
 CFG_TEST_PROTOCOL  mCfgTestProtocol = {
-  ExternFunc
+  ExternFunc,
+  ExternFunc2
 };
 
 VOID

@@ -12,12 +12,10 @@
 
 SECTION .text
     
-global ASM_PFX(ExternFunc)
-ASM_PFX(ExternFunc):
-  nop
-  ret
+;extern ASM_PFX(MyTrapFunc)
 
-global ASM_PFX(ExternFunc2)
-ASM_PFX(ExternFunc2):
-  nop
+global ASM_PFX(MyTrap)
+ASM_PFX(MyTrap):
+  jmp ASM_PFX(MyTrap)
   ret
+  

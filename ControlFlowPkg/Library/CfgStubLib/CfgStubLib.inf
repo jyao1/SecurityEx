@@ -22,9 +22,16 @@
   DESTRUCTOR                     = CfgLibDestructor
 
 [Sources]
-  CfgStub.c            | MSFT
-  UefiImage.c
+  CfgStub.c               | MSFT
+  UefiImage.c             | MSFT
   WinNTServiceLibMsvc.c   | MSFT # only for NT32
+  CfiStub.c               | GCC
+  
+[Sources.Ia32]
+  Ia32/MyTrap.nasm        | GCC
+
+[Sources.X64]
+  X64/MyTrap.nasm         | GCC
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -39,3 +46,4 @@
 [BuildOptions]
   # warning C4054: 'type cast': from function pointer 'void (__fastcall *)(UINTN)' to data pointer 'void *'
   MSFT:*_*_*_CC_FLAGS = /Od /GL- /wd4054 /DWINNT
+  GCC:*_*_*_CC_FLAGS = -O0

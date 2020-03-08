@@ -257,7 +257,7 @@ UefiCfgLibConstructor(
   Status = gBS->LocateProtocol (
                   &gCfgProtocolGuid,
                   NULL,
-                  &mCfgProtocol
+                  (VOID **)&mCfgProtocol
                   );
   if (!EFI_ERROR(Status)) {
     InsertTailList (&mCfgProtocol->CfgNode, &mCfgNode.Link);

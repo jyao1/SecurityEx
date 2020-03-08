@@ -44,3 +44,6 @@
   MSFT:*_VS2015x86_X64_DLINK_FLAGS = /LIBPATH:"$(VCINSTALLDIR)\Lib\AMD64"
   MSFT:*_VS2017_IA32_DLINK_FLAGS = /LIBPATH:"%VCToolsInstallDir%lib\x86"
   MSFT:*_VS2017_X64_DLINK_FLAGS = /LIBPATH:"%VCToolsInstallDir%lib\x64"
+
+  # need use -fsplit-lto-unit for project
+  GCC:*_CLANGPDB_*_CC_FLAGS = -O0 -fsanitize=cfi
