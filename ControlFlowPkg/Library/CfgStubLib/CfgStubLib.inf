@@ -26,12 +26,6 @@
   UefiImage.c             | MSFT
   WinNTServiceLibMsvc.c   | MSFT # only for NT32
   CfiStub.c               | GCC
-  
-[Sources.Ia32]
-  Ia32/MyTrap.nasm        | GCC
-
-[Sources.X64]
-  X64/MyTrap.nasm         | GCC
 
 [Packages]
   MdePkg/MdePkg.dec

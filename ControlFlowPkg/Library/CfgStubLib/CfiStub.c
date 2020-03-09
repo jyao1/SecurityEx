@@ -22,9 +22,16 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include "PeLoadConfiguration.h"
 #include "CfgProtocol.h"
 
+#if defined(__GNUC__) || defined(__clang__)
+  #define GLOBAL_USED __attribute__((used))
+#else
+  #define GLOBAL_USED
+#endif
+
+GLOBAL_USED
 VOID
 EFIAPI
-MyTrapFunc (
+MyTrap (
   VOID
   )
 {
