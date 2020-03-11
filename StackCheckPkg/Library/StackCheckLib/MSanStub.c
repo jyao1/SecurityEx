@@ -16,3 +16,11 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 #include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
 #include <Library/RngLib.h>
+
+VOID
+__msan_warning_noreturn ()
+{
+  DEBUG ((DEBUG_ERROR, "\n!!! __msan_warning_noreturn !!!\n"));
+  ASSERT (FALSE);
+  CpuDeadLoop();
+}
