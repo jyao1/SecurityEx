@@ -1,0 +1,42 @@
+## @file
+#
+# Copyright (c) 2016, Intel Corporation. All rights reserved.<BR>
+# This program and the accompanying materials are licensed and made available under
+# the terms and conditions of the BSD License that accompanies this distribution.
+# The full text of the license may be found at
+# http://opensource.org/licenses/bsd-license.php.
+#
+# THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
+#
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = Variant1SmmApp
+  FILE_GUID                      = 253FC3DE-39DC-4EEA-81F8-C78E6CD371B7
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = Variant1SmmAppEntrypoint
+
+[Sources]
+  Variant1SmmApp.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  SideChannelPkg/SideChannelPkg.dec
+
+[LibraryClasses]
+  UefiApplicationEntryPoint
+  BaseLib
+  DebugLib
+  UefiBootServicesTableLib
+  UefiLib
+  BaseMemoryLib
+
+[Guids]
+  gEdkiiPiSmmCommunicationRegionTableGuid
+
+[Protocols]
+  gEfiSmmCommunicationProtocolGuid
