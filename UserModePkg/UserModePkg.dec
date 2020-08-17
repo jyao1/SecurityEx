@@ -1,0 +1,25 @@
+## @file
+#
+# Copyright (c) 2020, Intel Corporation. All rights reserved.<BR>
+#
+#    This program and the accompanying materials
+#    are licensed and made available under the terms and conditions of the BSD License
+#    which accompanies this distribution. The full text of the license may be found at
+#    http://opensource.org/licenses/bsd-license.php
+#
+#    THE PROGRAM IS DISTRIBUTED UNDER THE BSD LICENSE ON AN "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
+#
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 0x00010005
+  PACKAGE_NAME                   = UserModePkg
+  PACKAGE_GUID                   = 06733196-5DB0-4B32-B8AD-69769A17B793
+  PACKAGE_VERSION                = 0.1
+
+[Includes]
+  Include
+
+[Protocols]
+  gUserModeThunkProtocolGuid        = {0x44109850, 0xc259, 0x4e95, { 0x87, 0x59, 0xcc, 0xd4, 0xf3, 0xd5, 0x24, 0xed }}
