@@ -1,6 +1,11 @@
-# These packages are to demonstrate how we enable security enhancement to prevent or detect buffer overflow in UEFI firmware.
+# Security Enhancement in UEFI firmware.
+
+These packages are to demonstrate how we enable security enhancement to prevent or detect buffer overflow in UEFI firmware.
+
+A full summary of UEFI mitigation is at [Summary](Summary.md).
 
 ## Feature:
+
 1) AslrPkg
 
 This package is to demonstrate Address Space Layout Randomization (ASLR).
@@ -69,6 +74,13 @@ This package is to demonstrate Control Flow Enforcement.
   ControlFlowPkg\CfgTest\CfgTest               - Test /guard:cf and -fsanitize=cfi
 
 For CET in SMM, please refer to https://github.com/tianocore/tianocore.github.io/wiki/CET-in-SMM 
+
+5) UserModePkg
+
+This package is to demonstrate running user-mode (ring-3) code in BIOS environment, for privilege isolation.
+
+5.1) A user-mode thunk driver (using SYSENTER/SYSEXIT for ring-switch)
+  UserModePkg\UserModeThunk
 
 ## Known limitation:
 This package is only the sample code to show the concept.
