@@ -44,6 +44,14 @@ Status: _Production_
 DXE controlled by: gEfiMdeModulePkgTokenSpaceGuid.PcdDxeNxMemoryProtectionPolicy in [MdeModulePkg.dec](https://github.com/tianocore/edk2/blob/master/MdeModulePkg/MdeModulePkg.dec), 
 SMM enabled by default.
 
+### OS Loader Protection
+
+Technology: BIOS publishes the mem_attribute_protocol. OS loader can use it to protect the image.
+
+Status: _Prototype_
+
+DXE driver is [CpuDxe](https://github.com/jyao1/edk2/tree/mem_attribute_protocol/UefiCpuPkg/CpuDxe). See [Bugzilla 3519](https://bugzilla.tianocore.org/show_bug.cgi?id=3519)
+
 ### SMM Code Access Check
 
 Technology: Only the SMM code covered by SMRAM Range Register (SMRR) can be executable.
